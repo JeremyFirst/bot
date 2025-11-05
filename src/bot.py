@@ -104,19 +104,35 @@ async def on_ready():
                                     if cmd.strip() and not cmd.strip().startswith('--')
                                 ]
                                 
-                                # Выполняем команды
-                                for command in commands:
+                                # Разделяем команды на CREATE TABLE и CREATE INDEX
+                                create_table_commands = [cmd for cmd in commands if cmd.upper().startswith('CREATE TABLE')]
+                                create_index_commands = [cmd for cmd in commands if cmd.upper().startswith('CREATE INDEX')]
+                                
+                                # Сначала создаем таблицы
+                                for command in create_table_commands:
                                     if command:
                                         try:
                                             await cursor.execute(command)
-                                            logger.debug(f"✓ Выполнено: {command[:50]}...")
+                                            logger.debug(f"✓ Таблица создана: {command[:50]}...")
                                         except Exception as e:
-                                            # Игнорируем ошибки "table already exists"
                                             error_str = str(e).lower()
                                             if "already exists" in error_str or "duplicate" in error_str:
-                                                logger.debug(f"ℹ️ Пропущено (уже существует): {command[:50]}...")
+                                                logger.debug(f"ℹ️ Таблица уже существует: {command[:50]}...")
                                             else:
-                                                logger.warning(f"⚠️ Ошибка при выполнении команды: {e}")
+                                                logger.warning(f"⚠️ Ошибка при создании таблицы: {e}")
+                                
+                                # Затем создаем индексы
+                                for command in create_index_commands:
+                                    if command:
+                                        try:
+                                            await cursor.execute(command)
+                                            logger.debug(f"✓ Индекс создан: {command[:50]}...")
+                                        except Exception as e:
+                                            error_str = str(e).lower()
+                                            if "already exists" in error_str or "duplicate" in error_str or "doesn't exist" in error_str:
+                                                logger.debug(f"ℹ️ Индекс пропущен: {command[:50]}...")
+                                            else:
+                                                logger.warning(f"⚠️ Ошибка при создании индекса: {e}")
                                                 logger.warning(f"   Команда: {command[:100]}")
                                 
                                 await conn.commit()
