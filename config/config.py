@@ -22,23 +22,29 @@ if CONFIG_FILE.exists():
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             CONFIG_DATA = yaml.safe_load(f) or {}
+        if CONFIG_DATA:
+            print(f"✓ Загружена конфигурация из {CONFIG_FILE}")
     except Exception as e:
-        print(f"Предупреждение: Не удалось загрузить config.yaml: {e}")
+        print(f"⚠️ Предупреждение: Не удалось загрузить config.yaml: {e}")
         CONFIG_DATA = {}
+else:
+    print(f"ℹ️ Файл {CONFIG_FILE} не найден, используются переменные окружения или значения по умолчанию")
 
 
-def get_config(key: str, default=None, env_key: str = None):
+def get_config(key: str, default=None, env_key: Optional[str] = None):
     """
     Получить значение конфигурации
     Приоритет: YAML > переменные окружения > значение по умолчанию
     """
     # Пробуем YAML
     if key in CONFIG_DATA:
-        return CONFIG_DATA[key]
+        value = CONFIG_DATA[key]
+        if value is not None:
+            return value
     
     # Пробуем переменные окружения
-    env_key = env_key or key
-    env_value = os.getenv(env_key)
+    env_key_to_use = env_key if env_key is not None else key
+    env_value = os.getenv(env_key_to_use)
     if env_value is not None:
         return env_value
     
@@ -47,15 +53,19 @@ def get_config(key: str, default=None, env_key: str = None):
 
 
 # Discord
-DISCORD_TOKEN = get_config('DISCORD_TOKEN', os.getenv('DISCORD_TOKEN', ''))
+DISCORD_TOKEN = get_config('DISCORD_TOKEN', os.getenv('DISCORD_TOKEN', '')) or ''
 
 # RCON (WebRCON)
-RCON_HOST = get_config('RCON_HOST', os.getenv('RCON_HOST', 'localhost'))
-RCON_PORT = int(get_config('RCON_PORT', os.getenv('RCON_PORT', '28016')))
-RCON_PASS = get_config('RCON_PASS', os.getenv('RCON_PASS', ''))
+RCON_HOST = get_config('RCON_HOST', os.getenv('RCON_PORT', 'localhost')) or 'localhost'
+rcon_port_str = get_config('RCON_PORT', os.getenv('RCON_PORT', '28016'))
+RCON_PORT = int(rcon_port_str) if rcon_port_str is not None else 28016
+RCON_PASS = get_config('RCON_PASS', os.getenv('RCON_PASS', '')) or ''
 
 # База данных (MariaDB/MySQL)
-DB_URL = get_config('DB_URL', os.getenv('DB_URL', 'mysql://user:password@localhost:3306/rustbot'))
+DB_URL = get_config('DB_URL', os.getenv('DB_URL', 'mysql://user:password@localhost:3306/rustbot')) or 'mysql://user:password@localhost:3306/rustbot'
+# Удаляем префикс jdbc: если есть (для совместимости)
+if DB_URL.startswith('jdbc:'):
+    DB_URL = DB_URL.replace('jdbc:', '', 1)
 
 # Категории администрации
 admin_categories_env = os.getenv('ADMIN_ROLE_CATEGORIES', '')
@@ -135,6 +145,11 @@ LOG_FILE = get_config('LOG_FILE', os.getenv('LOG_FILE', 'logs/bot.log'))
 LOG_LEVEL = get_config('LOG_LEVEL', os.getenv('LOG_LEVEL', 'INFO'))
 
 # Настройки планировщика
-SCHEDULER_CHECK_INTERVAL = int(get_config('SCHEDULER_CHECK_INTERVAL', os.getenv('SCHEDULER_CHECK_INTERVAL', '60')))
-PRIVILEGE_REMOVAL_RETRY_DELAY = int(get_config('PRIVILEGE_REMOVAL_RETRY_DELAY', os.getenv('PRIVILEGE_REMOVAL_RETRY_DELAY', '120')))
-MAX_REMOVAL_RETRIES = int(get_config('MAX_REMOVAL_RETRIES', os.getenv('MAX_REMOVAL_RETRIES', '3')))
+scheduler_interval = get_config('SCHEDULER_CHECK_INTERVAL', os.getenv('SCHEDULER_CHECK_INTERVAL', '60'))
+SCHEDULER_CHECK_INTERVAL = int(scheduler_interval) if scheduler_interval is not None else 60
+
+privilege_retry_delay = get_config('PRIVILEGE_REMOVAL_RETRY_DELAY', os.getenv('PRIVILEGE_REMOVAL_RETRY_DELAY', '120'))
+PRIVILEGE_REMOVAL_RETRY_DELAY = int(privilege_retry_delay) if privilege_retry_delay is not None else 120
+
+max_retries = get_config('MAX_REMOVAL_RETRIES', os.getenv('MAX_REMOVAL_RETRIES', '3'))
+MAX_REMOVAL_RETRIES = int(max_retries) if max_retries is not None else 3

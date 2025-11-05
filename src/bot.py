@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Добавляем корневую директорию проекта в PYTHONPATH
 project_root = Path(__file__).parent.parent
@@ -27,14 +28,17 @@ from src.commands import setup_admin, setup_privilege, setup_warn
 from src.tasks.scheduler import PrivilegeScheduler
 
 # Настройка логирования
-log_dir = Path(LOG_FILE).parent
+log_file_path = LOG_FILE or 'logs/bot.log'
+log_level_str = LOG_LEVEL or 'INFO'
+
+log_dir = Path(log_file_path).parent
 log_dir.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL.upper()),
+    level=getattr(logging, log_level_str.upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        logging.FileHandler(log_file_path, encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -53,9 +57,9 @@ intents.guilds = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Глобальные объекты
-db: Database = None
-rcon_manager: RCONManager = None
-scheduler: PrivilegeScheduler = None
+db: Optional[Database] = None
+rcon_manager: Optional[RCONManager] = None
+scheduler: Optional[PrivilegeScheduler] = None
 
 
 @bot.event
@@ -63,8 +67,9 @@ async def on_ready():
     """Событие при запуске бота"""
     global db, rcon_manager, scheduler
     
-    logger.info(f'{bot.user} успешно запущен!')
-    logger.info(f'Бот подключен к Discord как {bot.user.name}')
+    if bot.user:
+        logger.info(f'{bot.user} успешно запущен!')
+        logger.info(f'Бот подключен к Discord как {bot.user.name}')
     logger.info(f'Бот подключен к {len(bot.guilds)} серверам')
     
     try:
@@ -117,7 +122,8 @@ async def on_ready():
                 channel_id = CHANNELS['ADMIN_LOGS']
                 for guild in bot.guilds:
                     channel = guild.get_channel(channel_id)
-                    if channel:
+                    # Проверяем, что канал - это текстовый канал (TextChannel)
+                    if isinstance(channel, discord.TextChannel):
                         await channel.send("✅ Бот запущен и готов к работе")
                         break
             except Exception as e:
@@ -164,9 +170,20 @@ async def cleanup():
 
 def main():
     """Главная функция запуска бота"""
-    if not DISCORD_TOKEN or DISCORD_TOKEN == "YOUR_DISCORD_BOT_TOKEN_HERE":
-        logger.error("Пожалуйста, установите DISCORD_TOKEN в файле .env")
-        logger.error("Создайте файл .env на основе .env.example и заполните ваш токен Discord бота")
+    if not DISCORD_TOKEN or DISCORD_TOKEN == "YOUR_DISCORD_BOT_TOKEN_HERE" or DISCORD_TOKEN == "":
+        logger.error("=" * 60)
+        logger.error("ОШИБКА: DISCORD_TOKEN не найден!")
+        logger.error("=" * 60)
+        logger.error("Создайте файл config/config.yaml на сервере и заполните его.")
+        logger.error("Пример конфигурации можно найти в репозитории.")
+        logger.error("")
+        logger.error("Минимальная конфигурация:")
+        logger.error("DISCORD_TOKEN: \"ваш_токен_дискорд_бота\"")
+        logger.error("RCON_HOST: \"ip_вашего_rust_сервера\"")
+        logger.error("RCON_PORT: 28016")
+        logger.error("RCON_PASS: \"ваш_rcon_пароль\"")
+        logger.error("DB_URL: \"mysql://пользователь:пароль@localhost:3306/rustbot\"")
+        logger.error("=" * 60)
         return
     
     try:
