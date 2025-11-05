@@ -109,28 +109,40 @@ async def on_ready():
                                 create_index_commands = [cmd for cmd in commands if cmd.upper().startswith('CREATE INDEX')]
                                 
                                 # Сначала создаем таблицы
+                                logger.info(f"Создание {len(create_table_commands)} таблиц...")
                                 for command in create_table_commands:
                                     if command:
                                         try:
                                             await cursor.execute(command)
-                                            logger.debug(f"✓ Таблица создана: {command[:50]}...")
+                                            # Извлекаем имя таблицы из команды
+                                            table_name = command.split('(')[0].split()[-1] if '(' in command else "unknown"
+                                            logger.info(f"✓ Таблица создана: {table_name}")
                                         except Exception as e:
                                             error_str = str(e).lower()
                                             if "already exists" in error_str or "duplicate" in error_str:
-                                                logger.debug(f"ℹ️ Таблица уже существует: {command[:50]}...")
+                                                table_name = command.split('(')[0].split()[-1] if '(' in command else "unknown"
+                                                logger.info(f"ℹ️ Таблица уже существует: {table_name}")
                                             else:
-                                                logger.warning(f"⚠️ Ошибка при создании таблицы: {e}")
+                                                logger.error(f"❌ Ошибка при создании таблицы: {e}")
+                                                logger.error(f"   Команда: {command[:100]}")
                                 
                                 # Затем создаем индексы
+                                logger.info(f"Создание {len(create_index_commands)} индексов...")
                                 for command in create_index_commands:
                                     if command:
                                         try:
                                             await cursor.execute(command)
-                                            logger.debug(f"✓ Индекс создан: {command[:50]}...")
+                                            # Извлекаем имя индекса из команды
+                                            index_name = command.split('ON')[0].split()[-1] if 'ON' in command else "unknown"
+                                            logger.debug(f"✓ Индекс создан: {index_name}")
                                         except Exception as e:
                                             error_str = str(e).lower()
-                                            if "already exists" in error_str or "duplicate" in error_str or "doesn't exist" in error_str:
-                                                logger.debug(f"ℹ️ Индекс пропущен: {command[:50]}...")
+                                            if "already exists" in error_str or "duplicate" in error_str:
+                                                index_name = command.split('ON')[0].split()[-1] if 'ON' in command else "unknown"
+                                                logger.debug(f"ℹ️ Индекс уже существует: {index_name}")
+                                            elif "doesn't exist" in error_str:
+                                                # Таблица не существует - это нормально, индекс будет создан позже
+                                                logger.debug(f"ℹ️ Индекс пропущен (таблица не существует): {command[:50]}...")
                                             else:
                                                 logger.warning(f"⚠️ Ошибка при создании индекса: {e}")
                                                 logger.warning(f"   Команда: {command[:100]}")
