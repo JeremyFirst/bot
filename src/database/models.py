@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, List
 import aiomysql
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 logger = logging.getLogger(__name__)
 
@@ -20,21 +20,46 @@ class Database:
         
         # Парсим URL для подключения
         parsed = urlparse(db_url)
+        
+        # Декодируем пароль (на случай URL-кодирования)
+        password = unquote(parsed.password or '')
+        
         self.config = {
             'host': parsed.hostname or 'localhost',
             'port': parsed.port or 3306,
             'user': parsed.username or 'root',
-            'password': parsed.password or '',
+            'password': password,
             'db': parsed.path.lstrip('/') if parsed.path else 'rustbot',
             'charset': 'utf8mb4',
             'autocommit': False
         }
+        
+        logger.debug(f"Парсинг DB_URL: host={self.config['host']}, user={self.config['user']}, db={self.config['db']}, port={self.config['port']}")
     
     async def connect(self):
         """Подключение к базе данных"""
         try:
+            logger.info(f"Попытка подключения к БД: {self.config['host']}:{self.config['port']}, пользователь: {self.config['user']}, БД: {self.config['db']}")
             self.pool = await aiomysql.create_pool(**self.config, minsize=1, maxsize=10)
             logger.info("✓ Подключение к базе данных установлено")
+        except aiomysql.OperationalError as e:
+            error_code, error_msg = e.args
+            logger.error(f"Ошибка подключения к БД (код {error_code}): {error_msg}")
+            if error_code == 1045:
+                logger.error("=" * 60)
+                logger.error("ОШИБКА АВТОРИЗАЦИИ:")
+                logger.error("Проверьте:")
+                logger.error("1. Правильность пароля в DB_URL")
+                logger.error("2. Существует ли пользователь в MySQL/MariaDB")
+                logger.error("3. Имеет ли пользователь права доступа с IP контейнера")
+                logger.error("")
+                logger.error("Для Pterodactyl Docker контейнеров:")
+                logger.error("Создайте пользователя с доступом с любого хоста:")
+                logger.error("  CREATE USER 'пользователь'@'%' IDENTIFIED BY 'пароль';")
+                logger.error("  GRANT ALL PRIVILEGES ON база_данных.* TO 'пользователь'@'%';")
+                logger.error("  FLUSH PRIVILEGES;")
+                logger.error("=" * 60)
+            raise
         except Exception as e:
             logger.error(f"Ошибка подключения к БД: {e}")
             raise
