@@ -2,14 +2,11 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
-import socket
-import struct
 import os
 import json
 from typing import Optional
 from dotenv import load_dotenv
 import websockets
-from rcon.source import Client
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
@@ -24,18 +21,15 @@ logger = logging.getLogger(__name__)
 logging.getLogger('discord').setLevel(logging.INFO)
 logging.getLogger('websockets').setLevel(logging.INFO)
 
-# Конфигурация RCON из .env
-RCON_HOST = os.getenv('RCON_HOST', '212.232.75.180')
-RCON_PORT = int(os.getenv('RCON_PORT', '27025'))
-RCON_PASSWORD = os.getenv('RCON_PASSWORD', '7gj-2R4-k32-6Uk')
-RCON_TIMEOUT = int(os.getenv('RCON_TIMEOUT', '10'))
+# Конфигурация RCON (WebRCON) из .env
+RCON_HOST = os.getenv('RCON_HOST', 'localhost')
+RCON_PORT = int(os.getenv('RCON_PORT', '27015'))
+RCON_PASSWORD = os.getenv('RCON_PASSWORD', '')
 
-# Альтернативные порты для попытки подключения
-RCON_PORTS = [27025, 27023, 27015]
-
-# Конфигурация WebRCON из .env
-# WebRCON использует тот же порт, что и RCON, но через WebSocket протокол
-WEBRCON_ENABLED = os.getenv('WEBRCON_ENABLED', 'false').lower() == 'true'
+# Список портов для попыток подключения WebRCON
+RCON_PORTS = [RCON_PORT, RCON_PORT - 2, RCON_PORT + 2, RCON_PORT - 10, RCON_PORT + 10]
+RCON_PORTS = [p for p in RCON_PORTS if p > 0 and p < 65536]  # Фильтруем валидные порты
+RCON_PORTS = list(dict.fromkeys(RCON_PORTS))  # Удаляем дубликаты
 
 # Конфигурация Discord бота из .env
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', 'YOUR_DISCORD_BOT_TOKEN_HERE')
@@ -44,307 +38,6 @@ DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', 'YOUR_DISCORD_BOT_TOKEN_HERE')
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
-
-# Глобальная переменная для хранения сокета
-rcon_socket: Optional[socket.socket] = None
-rcon_port: Optional[int] = None
-
-
-class RCONClient:
-    """
-    Простой RCON клиент для Rust сервера
-    """
-    SERVERDATA_AUTH = 3
-    SERVERDATA_AUTH_RESPONSE = 2
-    SERVERDATA_EXECCOMMAND = 2
-    SERVERDATA_RESPONSE_VALUE = 0
-    SERVERDATA_UNKNOWN = 4  # Rust может отправлять пакеты Type=4, их нужно игнорировать
-    
-    def __init__(self, host: str, port: int, password: str, timeout: int = 10):
-        self.host = host
-        self.port = port
-        self.password = password
-        self.timeout = timeout
-        self.sock = None
-        self.request_id = 0
-        
-    def connect(self) -> bool:
-        """Подключение к RCON серверу"""
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # Увеличиваем timeout для подключения
-            self.sock.settimeout(self.timeout)
-            self.sock.connect((self.host, self.port))
-            logger.info(f"Сокет подключен к {self.host}:{self.port}")
-            # Увеличиваем timeout для чтения после подключения
-            self.sock.settimeout(30)  # 30 секунд для чтения ответов
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка подключения сокета: {e}")
-            if self.sock:
-                self.sock.close()
-            self.sock = None
-            return False
-    
-    def authenticate(self) -> bool:
-        """Аутентификация на RCON сервере"""
-        if not self.sock:
-            return False
-            
-        try:
-            # Сохраняем ID запроса для проверки ответа
-            auth_request_id = self.request_id + 1
-            
-            # Отправка пакета аутентификации
-            auth_packet = self._create_packet(
-                self.SERVERDATA_AUTH,
-                self.password.encode('utf-8')
-            )
-            logger.debug(f"Отправка пакета аутентификации (ID: {auth_request_id}, размер: {len(auth_packet)} байт)")
-            self.sock.send(auth_packet)
-            logger.debug("Пакет аутентификации отправлен, ожидание ответа...")
-            
-            # Увеличиваем таймаут для чтения ответа
-            original_timeout = self.sock.gettimeout()
-            self.sock.settimeout(15)  # 15 секунд на ответ
-            
-            try:
-                # Rust сервер отправляет два пакета в ответ на аутентификацию
-                # Первый пакет - подтверждение аутентификации
-                response1 = self._read_packet()
-                if not response1:
-                    logger.error("Не получен первый пакет аутентификации (таймаут или пустой ответ)")
-                    self.sock.settimeout(original_timeout)
-                    return False
-                
-                logger.debug(f"Получен первый пакет: ID={response1.get('id')}, Type={response1.get('type')}")
-                
-                # Rust сервер отправляет два пакета: первый Type=0, второй Type=2 (AUTH_RESPONSE)
-                # Также может отправлять дополнительные пакеты Type=4, которые нужно игнорировать
-                # Пробуем прочитать второй пакет
-                try:
-                    self.sock.settimeout(2)  # Короткий таймаут для второго пакета
-                    response2 = self._read_packet()
-                    if response2:
-                        logger.debug(f"Получен второй пакет: ID={response2.get('id')}, Type={response2.get('type')}")
-                        
-                        # Проверяем второй пакет - это должен быть AUTH_RESPONSE
-                        if (response2['type'] == self.SERVERDATA_AUTH_RESPONSE and 
-                            response2['id'] == auth_request_id):
-                            logger.info("Успешная аутентификация на RCON сервере (по второму пакету)")
-                            
-                            # Rust может отправить дополнительные пакеты (Type=4), читаем их и игнорируем
-                            try:
-                                self.sock.settimeout(0.5)  # Очень короткий таймаут
-                                while True:
-                                    extra_packet = self._read_packet()
-                                    if not extra_packet:
-                                        break
-                                    if extra_packet.get('type') == self.SERVERDATA_UNKNOWN:
-                                        logger.debug(f"Получен дополнительный пакет Type=4, игнорируем")
-                                    else:
-                                        logger.debug(f"Получен дополнительный пакет Type={extra_packet.get('type')}, игнорируем")
-                            except (socket.timeout, Exception):
-                                pass  # Игнорируем ошибки при чтении дополнительных пакетов
-                            
-                            self.sock.settimeout(original_timeout)
-                            return True
-                except socket.timeout:
-                    logger.debug("Второй пакет не получен (возможно, Rust не отправляет его)")
-                except Exception as e:
-                    logger.debug(f"Ошибка при чтении второго пакета: {e}")
-                
-                self.sock.settimeout(original_timeout)
-                
-                # Также проверяем первый пакет на случай если Rust отправляет только один
-                if (response1['type'] == self.SERVERDATA_AUTH_RESPONSE and 
-                    response1['id'] == auth_request_id):
-                    logger.info("Успешная аутентификация на RCON сервере (по первому пакету)")
-                    return True
-                else:
-                    logger.error(f"Неудачная аутентификация. Первый пакет: Тип={response1.get('type')}, ID={response1.get('id')}, ожидалось: {auth_request_id}")
-                    logger.error(f"Ожидался тип {self.SERVERDATA_AUTH_RESPONSE}, получен {response1.get('type')}")
-                    return False
-                    
-            except socket.timeout:
-                logger.error("Таймаут при чтении ответа аутентификации (сервер не отвечает)")
-                self.sock.settimeout(original_timeout)
-                return False
-                
-        except socket.timeout:
-            logger.error("Таймаут при отправке пакета аутентификации")
-            return False
-        except Exception as e:
-            logger.error(f"Ошибка при аутентификации: {e}")
-            return False
-    
-    def _create_packet(self, packet_type: int, body: bytes) -> bytes:
-        """Создание RCON пакета для Rust сервера"""
-        self.request_id += 1
-        packet_id = self.request_id
-        
-        # Rust RCON формат: [SIZE(4)][ID(4)][TYPE(4)][BODY][PADDING(2)]
-        # SIZE = размер данных пакета (без самого размера)
-        # ID и TYPE - 4 байта каждое (little-endian)
-        # BODY - данные команды/пароля
-        # PADDING - два нулевых байта в конце
-        
-        # Создаем тело пакета (без размера)
-        packet_body = struct.pack('<ii', packet_id, packet_type)
-        packet_body += body
-        packet_body += b'\x00\x00'  # Padding
-        
-        # Размер пакета (без 4 байт самого размера)
-        packet_size = len(packet_body)
-        
-        # Полный пакет: размер + тело
-        packet = struct.pack('<i', packet_size) + packet_body
-        
-        logger.debug(f"Создан RCON пакет: size={packet_size}, id={packet_id}, type={packet_type}, body_len={len(body)}")
-        return packet
-    
-    def _read_packet(self) -> Optional[dict]:
-        """Чтение RCON пакета"""
-        try:
-            # Чтение размера пакета (4 байта)
-            size_data = self._recv_exact(4)
-            if not size_data:
-                logger.warning("Не удалось прочитать размер пакета")
-                return None
-            size = struct.unpack('<i', size_data)[0]
-            logger.debug(f"Ожидаемый размер пакета: {size} байт")
-            
-            if size <= 0 or size > 4096:  # Защита от некорректных данных
-                logger.error(f"Некорректный размер пакета: {size}")
-                return None
-            
-            # Чтение данных пакета
-            packet_data = self._recv_exact(size)
-            if not packet_data or len(packet_data) < 8:
-                logger.warning(f"Недостаточно данных в пакете: получено {len(packet_data) if packet_data else 0} байт, минимум 8")
-                return None
-            
-            # Распаковка ID и типа
-            packet_id, packet_type = struct.unpack('<ii', packet_data[:8])
-            logger.debug(f"Получен пакет: ID={packet_id}, Type={packet_type}")
-            
-            # Тело пакета (без последних 2 байт padding)
-            body = packet_data[8:-2] if len(packet_data) > 10 else packet_data[8:]
-            
-            return {
-                'id': packet_id,
-                'type': packet_type,
-                'body': body
-            }
-        except socket.timeout:
-            logger.error("Таймаут при чтении пакета (возможно, сервер не отвечает на RCON команды)")
-            return None
-        except Exception as e:
-            logger.error(f"Ошибка при чтении пакета: {e}")
-            return None
-    
-    def _recv_exact(self, size: int) -> Optional[bytes]:
-        """Чтение точного количества байт"""
-        data = b''
-        while len(data) < size:
-            chunk = self.sock.recv(size - len(data))
-            if not chunk:
-                return None
-            data += chunk
-        return data
-    
-    def send_command(self, command: str) -> Optional[str]:
-        """Отправка команды на сервер"""
-        if not self.sock:
-            return None
-        
-        try:
-            # Сохраняем ID команды для проверки ответа
-            command_id = self.request_id + 1
-            
-            # Отправка команды
-            command_packet = self._create_packet(
-                self.SERVERDATA_EXECCOMMAND,
-                command.encode('utf-8')
-            )
-            logger.debug(f"Отправка команды '{command}' (ID: {command_id})")
-            self.sock.send(command_packet)
-            
-            # Rust может отправлять несколько пакетов в ответ
-            # Читаем все пакеты и собираем ответ
-            response_parts = []
-            original_timeout = self.sock.gettimeout()
-            self.sock.settimeout(10)  # 10 секунд на получение ответа
-            
-            try:
-                # Читаем первый пакет ответа
-                response = self._read_packet()
-                if not response:
-                    logger.warning("Не получен ответ на команду")
-                    self.sock.settimeout(original_timeout)
-                    return None
-                
-                logger.debug(f"Получен пакет ответа: ID={response.get('id')}, Type={response.get('type')}")
-                
-                # Проверяем, что это ответ на нашу команду
-                if response['id'] == command_id and response['type'] == self.SERVERDATA_RESPONSE_VALUE:
-                    # Добавляем тело ответа
-                    body = response['body'].decode('utf-8', errors='ignore')
-                    if body:
-                        response_parts.append(body)
-                
-                # Пробуем прочитать дополнительные пакеты (Rust может отправлять несколько)
-                try:
-                    self.sock.settimeout(1)  # Короткий таймаут для дополнительных пакетов
-                    while True:
-                        extra_packet = self._read_packet()
-                        if not extra_packet:
-                            break
-                        
-                        # Игнорируем Type=4 и другие служебные пакеты
-                        if extra_packet.get('type') == self.SERVERDATA_UNKNOWN:
-                            logger.debug("Получен служебный пакет Type=4, игнорируем")
-                            continue
-                        
-                        # Если это ответ на нашу команду, добавляем его
-                        if extra_packet['id'] == command_id and extra_packet['type'] == self.SERVERDATA_RESPONSE_VALUE:
-                            body = extra_packet['body'].decode('utf-8', errors='ignore')
-                            if body:
-                                response_parts.append(body)
-                        else:
-                            logger.debug(f"Получен пакет с другим ID или типом: ID={extra_packet.get('id')}, Type={extra_packet.get('type')}")
-                except socket.timeout:
-                    # Нет дополнительных пакетов - это нормально
-                    pass
-                except Exception as e:
-                    logger.debug(f"Ошибка при чтении дополнительных пакетов: {e}")
-                
-                self.sock.settimeout(original_timeout)
-                
-                # Объединяем все части ответа
-                if response_parts:
-                    full_response = ''.join(response_parts)
-                    logger.debug(f"Получен полный ответ на команду '{command}': {len(full_response)} символов")
-                    return full_response
-                else:
-                    logger.warning(f"Получен ответ, но тело пустое")
-                    return None
-                    
-            except socket.timeout:
-                logger.error(f"Таймаут при ожидании ответа на команду '{command}'")
-                self.sock.settimeout(original_timeout)
-                return None
-                
-        except Exception as e:
-            logger.error(f"Ошибка при отправке команды '{command}': {e}")
-            return None
-    
-    def close(self):
-        """Закрытие соединения"""
-        if self.sock:
-            self.sock.close()
-            self.sock = None
-
 
 class WebRCONClient:
     """
@@ -576,28 +269,29 @@ async def on_ready():
     logger.info(f'{bot.user} успешно запущен!')
     logger.info(f'Бот подключен к Discord как {bot.user.name}')
     
-    # Автоматическое подключение к RCON при запуске бота
-    logger.info("Попытка автоматического подключения к RCON серверу...")
+    # Автоматическое подключение к WebRCON при запуске бота
+    logger.info("[DEBUG] Попытка автоматического подключения к WebRCON серверу...")
     success = await connect_to_rcon()
     
     if success:
-        logger.info("✓ Успешное подключение к RCON серверу!")
+        logger.info("[DEBUG] ✓ Успешное подключение к WebRCON серверу!")
         
         # Устанавливаем статус бота
         await bot.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="Rust сервер"
+                name=f"WebRCON (порт {rcon_port})"
             ),
             status=discord.Status.online
         )
     else:
-        logger.error("✗ Не удалось подключиться к RCON серверу!")
+        logger.error("[DEBUG] ✗ Не удалось подключиться к WebRCON серверу!")
+        logger.error("[DEBUG] Убедитесь, что в Startup Command установлено: +rcon.web true")
         await bot.change_presence(
             status=discord.Status.idle,
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="RCON (не подключен)"
+                name="WebRCON (не подключен)"
             )
         )
 
@@ -605,9 +299,9 @@ async def on_ready():
 @bot.command(name='rcon_test')
 async def rcon_test(ctx):
     """
-    Тестовая команда для проверки RCON подключения
+    Тестовая команда для проверки WebRCON подключения
     """
-    logger.info("Запрос на тестирование RCON подключения")
+    logger.info("[DEBUG] Запрос на тестирование WebRCON подключения")
     
     # Попытка подключения
     success = await connect_to_rcon()
@@ -617,20 +311,20 @@ async def rcon_test(ctx):
         response = await send_rcon_command("version")
         
         if response:
-            await ctx.send(f"✅ RCON подключение работает!\n**Ответ сервера:**\n```{response}```")
+            await ctx.send(f"✅ WebRCON подключение работает!\n**Ответ сервера:**\n```{response}```")
         else:
             await ctx.send("⚠️ Подключение установлено, но команда не выполнена")
     else:
-        await ctx.send("❌ Не удалось подключиться к RCON серверу. Проверьте логи.")
+        await ctx.send("❌ Не удалось подключиться к WebRCON серверу. Проверьте логи.")
 
 
 @bot.command(name='rcon')
 async def rcon_command(ctx, *, command: str):
     """
-    Команда для отправки RCON команд на сервер
+    Команда для отправки RCON команд на сервер через WebRCON
     Использование: !rcon <команда>
     """
-    logger.info(f"Запрос на выполнение RCON команды: {command}")
+    logger.info(f"[DEBUG] Запрос на выполнение RCON команды: {command}")
     
     response = await send_rcon_command(command)
     

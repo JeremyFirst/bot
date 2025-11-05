@@ -1,5 +1,4 @@
 discord.py>=2.3.0
 python-dotenv>=1.0.0
 websockets>=12.0
-rcon>=2.3.4
 
