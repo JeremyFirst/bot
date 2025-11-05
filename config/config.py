@@ -153,3 +153,8 @@ PRIVILEGE_REMOVAL_RETRY_DELAY = int(privilege_retry_delay) if privilege_retry_de
 
 max_retries = get_config('MAX_REMOVAL_RETRIES', os.getenv('MAX_REMOVAL_RETRIES', '3'))
 MAX_REMOVAL_RETRIES = int(max_retries) if max_retries is not None else 3
+
+# Статус активности бота
+BOT_ACTIVITY_NAME = get_config('BOT_ACTIVITY_NAME', os.getenv('BOT_ACTIVITY_NAME', 'RUST сервер')) or 'RUST сервер'
+bot_activity_type_raw = get_config('BOT_ACTIVITY_TYPE', os.getenv('BOT_ACTIVITY_TYPE', 'watching')) or 'watching'
+BOT_ACTIVITY_TYPE = bot_activity_type_raw.lower() if isinstance(bot_activity_type_raw, str) else 'watching'

@@ -5,6 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
+from typing import Optional
 
 from config.config import ADMIN_ROLE_CATEGORIES, ROLE_MAPPINGS
 from src.utils.embeds import create_admin_list_embed, create_error_embed
@@ -50,7 +51,7 @@ class AdminCommands(commands.Cog):
     async def showadmin(
         self,
         interaction: discord.Interaction,
-        category: str = None
+        category: Optional[str] = None
     ):
         """Команда /showadmin - отображает состав администрации"""
         try:

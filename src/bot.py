@@ -20,7 +20,9 @@ from config.config import (
     LOG_FILE,
     LOG_LEVEL,
     CHANNELS,
-    DB_URL
+    DB_URL,
+    BOT_ACTIVITY_NAME,
+    BOT_ACTIVITY_TYPE
 )
 from src.database.models import Database
 from src.rcon.rcon_manager import RCONManager
@@ -189,12 +191,23 @@ async def on_ready():
         rcon_manager = RCONManager()
         success = await rcon_manager.connect()
         
+        # Установка статуса активности бота
+        activity_type_map = {
+            'watching': discord.ActivityType.watching,
+            'playing': discord.ActivityType.playing,
+            'streaming': discord.ActivityType.streaming,
+            'listening': discord.ActivityType.listening,
+            'competing': discord.ActivityType.competing
+        }
+        
+        activity_type = activity_type_map.get(BOT_ACTIVITY_TYPE, discord.ActivityType.watching)
+        
         if success:
             logger.info(f"✓ RCON подключен на порту {rcon_manager.connected_port}")
             await bot.change_presence(
                 activity=discord.Activity(
-                    type=discord.ActivityType.watching,
-                    name=f"WebRCON (порт {rcon_manager.connected_port})"
+                    type=activity_type,
+                    name=BOT_ACTIVITY_NAME
                 ),
                 status=discord.Status.online
             )
@@ -203,8 +216,8 @@ async def on_ready():
             await bot.change_presence(
                 status=discord.Status.idle,
                 activity=discord.Activity(
-                    type=discord.ActivityType.watching,
-                    name="WebRCON (не подключен)"
+                    type=activity_type,
+                    name=BOT_ACTIVITY_NAME
                 )
             )
         

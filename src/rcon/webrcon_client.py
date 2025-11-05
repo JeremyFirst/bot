@@ -53,7 +53,7 @@ class WebRCONClient:
         logger.error(f"Не удалось подключиться к WebRCON на хосте {self.host} ни на одном из портов: {self.ports_to_try}")
         return False
     
-    async def _connect_to_port(self, port: int, test_command: str = None) -> bool:
+    async def _connect_to_port(self, port: int, test_command: Optional[str] = None) -> bool:
         """
         Попытка подключения к конкретному порту
         
