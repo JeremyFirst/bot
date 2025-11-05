@@ -154,18 +154,29 @@ class RCONClient:
             return False
     
     def _create_packet(self, packet_type: int, body: bytes) -> bytes:
-        """Создание RCON пакета"""
+        """Создание RCON пакета для Rust сервера"""
         self.request_id += 1
         packet_id = self.request_id
         
-        # Формат пакета: [ID(4)][TYPE(4)][BODY][PADDING(2)]
-        packet = struct.pack('<ii', packet_id, packet_type)
-        packet += body
-        packet += b'\x00\x00'
+        # Rust RCON формат: [SIZE(4)][ID(4)][TYPE(4)][BODY][PADDING(2)]
+        # SIZE = размер данных пакета (без самого размера)
+        # ID и TYPE - 4 байта каждое (little-endian)
+        # BODY - данные команды/пароля
+        # PADDING - два нулевых байта в конце
         
-        # Добавляем размер пакета в начало
-        size = struct.pack('<i', len(packet))
-        return size + packet
+        # Создаем тело пакета (без размера)
+        packet_body = struct.pack('<ii', packet_id, packet_type)
+        packet_body += body
+        packet_body += b'\x00\x00'  # Padding
+        
+        # Размер пакета (без 4 байт самого размера)
+        packet_size = len(packet_body)
+        
+        # Полный пакет: размер + тело
+        packet = struct.pack('<i', packet_size) + packet_body
+        
+        logger.debug(f"Создан RCON пакет: size={packet_size}, id={packet_id}, type={packet_type}, body_len={len(body)}")
+        return packet
     
     def _read_packet(self) -> Optional[dict]:
         """Чтение RCON пакета"""
