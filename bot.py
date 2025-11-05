@@ -58,6 +58,7 @@ class RCONClient:
     SERVERDATA_AUTH_RESPONSE = 2
     SERVERDATA_EXECCOMMAND = 2
     SERVERDATA_RESPONSE_VALUE = 0
+    SERVERDATA_UNKNOWN = 4  # Rust может отправлять пакеты Type=4, их нужно игнорировать
     
     def __init__(self, host: str, port: int, password: str, timeout: int = 10):
         self.host = host
@@ -119,6 +120,7 @@ class RCONClient:
                 logger.debug(f"Получен первый пакет: ID={response1.get('id')}, Type={response1.get('type')}")
                 
                 # Rust сервер отправляет два пакета: первый Type=0, второй Type=2 (AUTH_RESPONSE)
+                # Также может отправлять дополнительные пакеты Type=4, которые нужно игнорировать
                 # Пробуем прочитать второй пакет
                 try:
                     self.sock.settimeout(2)  # Короткий таймаут для второго пакета
@@ -130,6 +132,21 @@ class RCONClient:
                         if (response2['type'] == self.SERVERDATA_AUTH_RESPONSE and 
                             response2['id'] == auth_request_id):
                             logger.info("Успешная аутентификация на RCON сервере (по второму пакету)")
+                            
+                            # Rust может отправить дополнительные пакеты (Type=4), читаем их и игнорируем
+                            try:
+                                self.sock.settimeout(0.5)  # Очень короткий таймаут
+                                while True:
+                                    extra_packet = self._read_packet()
+                                    if not extra_packet:
+                                        break
+                                    if extra_packet.get('type') == self.SERVERDATA_UNKNOWN:
+                                        logger.debug(f"Получен дополнительный пакет Type=4, игнорируем")
+                                    else:
+                                        logger.debug(f"Получен дополнительный пакет Type={extra_packet.get('type')}, игнорируем")
+                            except (socket.timeout, Exception):
+                                pass  # Игнорируем ошибки при чтении дополнительных пакетов
+                            
                             self.sock.settimeout(original_timeout)
                             return True
                 except socket.timeout:
