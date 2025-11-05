@@ -79,6 +79,23 @@ async def on_ready():
         await db.connect()
         logger.info("✓ База данных подключена")
         
+        # Проверка наличия таблиц
+        try:
+            if db.pool:
+                async with db.pool.acquire() as conn:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s", (db.config['db'],))
+                        result = await cursor.fetchone()
+                        table_count = result[0] if result else 0
+                        if table_count == 0:
+                            logger.warning("⚠️ Таблицы в базе данных не найдены!")
+                            logger.warning("Примените схему базы данных:")
+                            logger.warning("  python3 database/apply_schema.py")
+                            logger.warning("  или")
+                            logger.warning(f"  mysql -u {db.config['user']} -p {db.config['db']} < database/schema.sql")
+        except Exception as e:
+            logger.warning(f"Не удалось проверить таблицы: {e}")
+        
         # Инициализация RCON менеджера
         logger.info("Инициализация RCON подключения...")
         rcon_manager = RCONManager()

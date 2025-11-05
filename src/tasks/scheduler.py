@@ -80,6 +80,11 @@ class PrivilegeScheduler:
                 await self._process_expired_privilege(privilege)
                 
         except Exception as e:
+            error_msg = str(e)
+            # Игнорируем ошибки отсутствия таблиц (БД еще не настроена)
+            if "doesn't exist" in error_msg or "Table" in error_msg:
+                logger.debug(f"Таблицы БД еще не созданы: {error_msg}")
+                return
             logger.error(f"Ошибка при проверке истекших привилегий: {e}", exc_info=True)
     
     async def _process_expired_privilege(self, privilege: dict):
