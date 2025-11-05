@@ -67,9 +67,16 @@ class Database:
     async def close(self):
         """Закрытие соединения с базой данных"""
         if self.pool:
-            self.pool.close()
-            await self.pool.wait_closed()
-            logger.info("Соединение с БД закрыто")
+            try:
+                self.pool.close()
+                await self.pool.wait_closed()
+                logger.info("Соединение с БД закрыто")
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    # Event loop уже закрыт, просто закрываем пул синхронно
+                    logger.debug("Event loop закрыт, пропускаем wait_closed")
+                else:
+                    raise
     
     # Users
     async def get_user_by_discord(self, discord_id: int) -> Optional[dict]:

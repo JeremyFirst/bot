@@ -97,16 +97,44 @@ async def on_ready():
                                 with open(schema_file, 'r', encoding='utf-8') as f:
                                     schema_sql = f.read()
                                 
-                                # Разбиваем SQL на отдельные команды
-                                commands = [
-                                    cmd.strip() 
-                                    for cmd in schema_sql.split(';') 
-                                    if cmd.strip() and not cmd.strip().startswith('--')
-                                ]
+                                # Убираем комментарии (строки начинающиеся с --)
+                                lines = []
+                                for line in schema_sql.split('\n'):
+                                    # Убираем комментарии в конце строки
+                                    comment_pos = line.find('--')
+                                    if comment_pos != -1:
+                                        line = line[:comment_pos]
+                                    lines.append(line)
+                                
+                                # Объединяем строки обратно
+                                cleaned_sql = '\n'.join(lines)
+                                
+                                # Разбиваем SQL на отдельные команды по точке с запятой
+                                commands = []
+                                current_command = []
+                                for line in cleaned_sql.split('\n'):
+                                    line = line.strip()
+                                    if not line:
+                                        continue
+                                    current_command.append(line)
+                                    if line.endswith(';'):
+                                        # Завершаем команду
+                                        command = ' '.join(current_command).rstrip(';').strip()
+                                        if command:
+                                            commands.append(command)
+                                        current_command = []
+                                
+                                # Если осталась незавершенная команда
+                                if current_command:
+                                    command = ' '.join(current_command).strip()
+                                    if command:
+                                        commands.append(command)
                                 
                                 # Разделяем команды на CREATE TABLE и CREATE INDEX
                                 create_table_commands = [cmd for cmd in commands if cmd.upper().startswith('CREATE TABLE')]
                                 create_index_commands = [cmd for cmd in commands if cmd.upper().startswith('CREATE INDEX')]
+                                
+                                logger.debug(f"Найдено {len(commands)} команд SQL: {len(create_table_commands)} таблиц, {len(create_index_commands)} индексов")
                                 
                                 # Сначала создаем таблицы
                                 logger.info(f"Создание {len(create_table_commands)} таблиц...")
@@ -270,7 +298,24 @@ def main():
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}", exc_info=True)
     finally:
-        asyncio.run(cleanup())
+        # Пытаемся выполнить cleanup, но если event loop уже закрыт - игнорируем ошибку
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                # Event loop уже закрыт, создаем новый
+                asyncio.run(cleanup())
+            else:
+                # Event loop еще открыт, используем его
+                loop.run_until_complete(cleanup())
+        except RuntimeError:
+            # Нет активного event loop, создаем новый
+            try:
+                asyncio.run(cleanup())
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    logger.warning("Event loop уже закрыт, пропускаем cleanup")
+                else:
+                    raise
 
 
 if __name__ == "__main__":
