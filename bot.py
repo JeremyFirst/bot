@@ -9,6 +9,7 @@ import json
 from typing import Optional
 from dotenv import load_dotenv
 import websockets
+from rcon.source import Client
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
@@ -387,26 +388,75 @@ class WebRCONClient:
 
 # Глобальные переменные для хранения подключений
 rcon_client: Optional[RCONClient] = None
+rcon_library_client: Optional[Client] = None  # Клиент из библиотеки python-rcon
 webrcon_client: Optional[WebRCONClient] = None
 use_webrcon = False
+use_rcon_library = False  # Флаг использования библиотеки python-rcon
 rcon_port: Optional[int] = None
 
 
 async def connect_to_rcon():
     """
     Функция для подключения к RCON серверу
-    Пробует WebRCON если включен, затем обычный RCON
+    Пробует библиотеку python-rcon, затем WebRCON если включен, затем обычный RCON
     Возвращает True при успешном подключении, False при ошибке
     """
-    global rcon_client, webrcon_client, use_webrcon, rcon_port
+    global rcon_client, rcon_library_client, webrcon_client, use_webrcon, use_rcon_library, rcon_port
     
     # Закрываем предыдущие подключения если есть
     if rcon_client:
         rcon_client.close()
         rcon_client = None
+    if rcon_library_client:
+        try:
+            rcon_library_client.close()
+        except:
+            pass
+        rcon_library_client = None
     if webrcon_client:
         await webrcon_client.close()
         webrcon_client = None
+    
+    # Сначала пробуем библиотеку python-rcon (она лучше работает с Rust)
+    logger.info("Попытка подключения через библиотеку python-rcon...")
+    for port in RCON_PORTS:
+        try:
+            logger.info(f"Попытка подключения через python-rcon к {RCON_HOST}:{port}")
+            loop = asyncio.get_event_loop()
+            
+            # Создаем клиент через executor (синхронная операция)
+            def create_client():
+                return Client(RCON_HOST, port, passwd=RCON_PASSWORD)
+            
+            client = await loop.run_in_executor(None, create_client)
+            
+            # Проверяем подключение командой
+            def test_command():
+                try:
+                    return client.run("version")
+                except Exception as e:
+                    logger.debug(f"Ошибка при тестовой команде: {e}")
+                    return None
+            
+            response = await loop.run_in_executor(None, test_command)
+            
+            if response:
+                logger.info(f"✓ Успешное подключение через python-rcon на порту {port}!")
+                logger.info(f"Ответ сервера на 'version': {response[:100] if response else 'пустой ответ'}")
+                rcon_library_client = client
+                use_rcon_library = True
+                use_webrcon = False
+                rcon_port = port
+                return True
+            else:
+                # Закрываем клиент если не удалось
+                try:
+                    client.close()
+                except:
+                    pass
+        except Exception as e:
+            logger.warning(f"Не удалось подключиться через python-rcon к {RCON_HOST}:{port}: {e}")
+            continue
     
     # Если WebRCON принудительно включен, пробуем его первым
     # WebRCON использует тот же порт, что и RCON, но через WebSocket протокол
@@ -491,11 +541,32 @@ async def send_rcon_command(command: str):
     """
     Отправка команды на RCON сервер (RCON или WebRCON)
     """
-    global rcon_client, webrcon_client, use_webrcon
+    global rcon_client, rcon_library_client, webrcon_client, use_webrcon, use_rcon_library
     
     try:
         # Проверяем наличие подключения
-        if use_webrcon:
+        if use_rcon_library:
+            # Используем библиотеку python-rcon
+            if rcon_library_client is None:
+                success = await connect_to_rcon()
+                if not success:
+                    return None
+            
+            if rcon_library_client is None:
+                return None
+            
+            # Отправка команды через библиотеку
+            loop = asyncio.get_event_loop()
+            def run_command():
+                try:
+                    return rcon_library_client.run(command)
+                except Exception as e:
+                    logger.error(f"Ошибка при выполнении команды через python-rcon: {e}")
+                    return None
+            
+            response = await loop.run_in_executor(None, run_command)
+            return response
+        elif use_webrcon:
             if webrcon_client is None or webrcon_client.websocket is None:
                 success = await connect_to_rcon()
                 if not success:
