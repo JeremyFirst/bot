@@ -118,27 +118,34 @@ class RCONClient:
                 
                 logger.debug(f"Получен первый пакет: ID={response1.get('id')}, Type={response1.get('type')}")
                 
-                # Пробуем прочитать второй пакет (может не прийти)
+                # Rust сервер отправляет два пакета: первый Type=0, второй Type=2 (AUTH_RESPONSE)
+                # Пробуем прочитать второй пакет
                 try:
                     self.sock.settimeout(2)  # Короткий таймаут для второго пакета
                     response2 = self._read_packet()
                     if response2:
                         logger.debug(f"Получен второй пакет: ID={response2.get('id')}, Type={response2.get('type')}")
+                        
+                        # Проверяем второй пакет - это должен быть AUTH_RESPONSE
+                        if (response2['type'] == self.SERVERDATA_AUTH_RESPONSE and 
+                            response2['id'] == auth_request_id):
+                            logger.info("Успешная аутентификация на RCON сервере (по второму пакету)")
+                            self.sock.settimeout(original_timeout)
+                            return True
                 except socket.timeout:
                     logger.debug("Второй пакет не получен (возможно, Rust не отправляет его)")
-                except Exception:
-                    pass  # Игнорируем ошибки при чтении второго пакета
+                except Exception as e:
+                    logger.debug(f"Ошибка при чтении второго пакета: {e}")
                 
                 self.sock.settimeout(original_timeout)
                 
-                # Проверяем, что первый ответ - это SERVERDATA_AUTH_RESPONSE
-                # и ID совпадает с нашим запросом
+                # Также проверяем первый пакет на случай если Rust отправляет только один
                 if (response1['type'] == self.SERVERDATA_AUTH_RESPONSE and 
                     response1['id'] == auth_request_id):
-                    logger.info("Успешная аутентификация на RCON сервере")
+                    logger.info("Успешная аутентификация на RCON сервере (по первому пакету)")
                     return True
                 else:
-                    logger.error(f"Неудачная аутентификация. Тип: {response1.get('type')}, ID: {response1.get('id')}, ожидалось: {auth_request_id}")
+                    logger.error(f"Неудачная аутентификация. Первый пакет: Тип={response1.get('type')}, ID={response1.get('id')}, ожидалось: {auth_request_id}")
                     logger.error(f"Ожидался тип {self.SERVERDATA_AUTH_RESPONSE}, получен {response1.get('type')}")
                     return False
                     
@@ -425,35 +432,40 @@ async def connect_to_rcon():
             loop = asyncio.get_event_loop()
             
             # Создаем клиент через executor (синхронная операция)
-            def create_client():
-                return Client(RCON_HOST, port, passwd=RCON_PASSWORD)
-            
-            client = await loop.run_in_executor(None, create_client)
-            
-            # Проверяем подключение командой
-            def test_command():
+            # Библиотека rcon использует контекстный менеджер, но мы можем использовать клиент напрямую
+            def create_and_test():
                 try:
-                    return client.run("version")
+                    # Создаем клиент и сразу тестируем
+                    with Client(RCON_HOST, port, passwd=RCON_PASSWORD) as client:
+                        return client.run("version")
                 except Exception as e:
-                    logger.debug(f"Ошибка при тестовой команде: {e}")
+                    logger.debug(f"Ошибка при создании/тестировании клиента rcon: {e}")
                     return None
             
-            response = await loop.run_in_executor(None, test_command)
+            response = await loop.run_in_executor(None, create_and_test)
             
             if response:
                 logger.info(f"✓ Успешное подключение через python-rcon на порту {port}!")
                 logger.info(f"Ответ сервера на 'version': {response[:100] if response else 'пустой ответ'}")
-                rcon_library_client = client
-                use_rcon_library = True
-                use_webrcon = False
-                rcon_port = port
-                return True
-            else:
-                # Закрываем клиент если не удалось
-                try:
-                    client.close()
-                except:
-                    pass
+                # Библиотека rcon использует контекстный менеджер, поэтому создаем клиент заново для постоянного использования
+                # Но для постоянного использования нужно использовать другой подход
+                # Пока оставляем самописную реализацию как основную, библиотеку используем только для проверки
+                logger.info("Библиотека rcon работает, но используем самописную реализацию для постоянного подключения")
+                # Пробуем подключиться самописным клиентом на этом порту
+                client = RCONClient(RCON_HOST, port, RCON_PASSWORD, RCON_TIMEOUT)
+                if client.connect() and client.authenticate():
+                    test_response = client.send_command("version")
+                    if test_response:
+                        rcon_client = client
+                        use_rcon_library = False
+                        use_webrcon = False
+                        rcon_port = port
+                        return True
+                    else:
+                        client.close()
+                else:
+                    if client.sock:
+                        client.close()
         except Exception as e:
             logger.warning(f"Не удалось подключиться через python-rcon к {RCON_HOST}:{port}: {e}")
             continue
