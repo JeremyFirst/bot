@@ -374,11 +374,12 @@ class WebRCONClient:
         
         for uri in uri_variants:
             try:
-                logger.info(f"Попытка подключения к WebRCON: {uri}")
+                logger.debug(f"[DEBUG] Попытка подключения к WebRCON: {uri}")
                 # Увеличиваем timeout для WebSocket подключения
                 # Используем правильный синтаксис для websockets библиотеки
                 try:
                     # Пробуем с extra_headers (для новых версий)
+                    logger.debug(f"[DEBUG] Пробуем подключение с extra_headers")
                     self.websocket = await asyncio.wait_for(
                         websockets.connect(uri, ping_interval=None, extra_headers={
                             "User-Agent": "WebRcon"
@@ -387,31 +388,36 @@ class WebRCONClient:
                     )
                 except TypeError:
                     # Если extra_headers не поддерживается, пробуем без него
-                    logger.debug("extra_headers не поддерживается, пробуем без него")
+                    logger.debug("[DEBUG] extra_headers не поддерживается, пробуем без него")
                     self.websocket = await asyncio.wait_for(
                         websockets.connect(uri, ping_interval=None),
                         timeout=10.0
                     )
-                logger.info(f"WebSocket подключен к {self.host}:{self.port} (URI: {uri})")
+                logger.info(f"[DEBUG] ✓ WebSocket подключен к {self.host}:{self.port} (URI: {uri})")
                 self.uri = uri  # Сохраняем рабочий URI
                 return True
             except asyncio.TimeoutError:
-                logger.warning(f"Таймаут при подключении к {uri}")
+                logger.warning(f"[DEBUG] Таймаут при подключении к {uri}")
                 continue
             except Exception as e:
                 error_msg = str(e)
-                logger.warning(f"Ошибка подключения к {uri}: {error_msg}")
+                logger.warning(f"[DEBUG] Ошибка подключения к {uri}: {error_msg}")
                 if "did not receive a valid HTTP response" in error_msg:
+                    logger.debug(f"[DEBUG] Неверный HTTP ответ, пробуем следующий вариант URI")
                     continue  # Пробуем следующий вариант
                 elif "Connection refused" in error_msg or "Connection closed" in error_msg:
+                    logger.debug(f"[DEBUG] Соединение отклонено, пробуем следующий вариант URI")
                     continue  # Пробуем следующий вариант
                 elif "extra_headers" in error_msg:
+                    logger.debug(f"[DEBUG] Проблема с extra_headers, пробуем следующий вариант URI")
                     continue  # Пробуем следующий вариант (уже обработано выше)
                 else:
                     # Другие ошибки - пробуем следующий вариант
+                    logger.debug(f"[DEBUG] Другая ошибка, пробуем следующий вариант URI")
                     continue
         
-        logger.error(f"Не удалось подключиться к WebRCON ни по одному из форматов URI")
+        logger.error(f"[DEBUG] Не удалось подключиться к WebRCON ни по одному из форматов URI")
+        logger.error(f"[DEBUG] Попробованы форматы: ws://host:port/password, ws://host:port/, ws://host:port, wss://host:port/password")
         self.websocket = None
         return False
     
@@ -429,8 +435,9 @@ class WebRCONClient:
                 "Name": "WebRcon"
             }
             
-            logger.debug(f"Отправка WebRCON команды: {json.dumps(message)}")
+            logger.debug(f"[DEBUG] Отправка WebRCON команды: {json.dumps(message)}")
             await self.websocket.send(json.dumps(message))
+            logger.debug(f"[DEBUG] Команда отправлена, ожидание ответа...")
             
             # Ожидание ответа с таймаутом
             try:
@@ -438,8 +445,9 @@ class WebRCONClient:
                     self.websocket.recv(),
                     timeout=10.0
                 )
-                logger.debug(f"Получен ответ WebRCON: {response_text[:200]}")
+                logger.debug(f"[DEBUG] Получен ответ WebRCON: {response_text[:200]}")
                 response = json.loads(response_text)
+                logger.debug(f"[DEBUG] Ответ распарсен: Identifier={response.get('Identifier')}, Type={response.get('Type')}")
                 
                 # Формат ответа согласно rust-experimental-webrcon:
                 # {"Identifier": 0, "Message": "...", "Stacktrace": "", "Type": 3}
@@ -473,92 +481,80 @@ class WebRCONClient:
 
 
 # Глобальные переменные для хранения подключений
-rcon_client: Optional[RCONClient] = None
+webrcon_client: Optional[WebRCONClient] = None
 rcon_port: Optional[int] = None
 
 
 async def connect_to_rcon():
     """
-    Функция для подключения к RCON серверу через самописную реализацию
-    Используется только обычный RCON (TCP), без WebRCON и библиотек
+    Функция для подключения к RCON серверу через WebRCON (WebSocket)
+    Используется только WebRCON, без обычного RCON
     Возвращает True при успешном подключении, False при ошибке
     """
-    global rcon_client, rcon_port
+    global webrcon_client, rcon_port
     
     # Закрываем предыдущее подключение если есть
-    if rcon_client:
-        rcon_client.close()
-        rcon_client = None
+    if webrcon_client:
+        await webrcon_client.close()
+        webrcon_client = None
     
-    # Пробуем самописную реализацию RCON на всех портах
-    logger.info("Попытка подключения к RCON серверу через самописную реализацию...")
+    # Пробуем WebRCON на всех портах
+    logger.info("[DEBUG] Попытка подключения к RCON серверу через WebRCON (WebSocket)...")
     for port in RCON_PORTS:
         try:
-            logger.info(f"[DEBUG] Попытка подключения к RCON: {RCON_HOST}:{port}")
-            client = RCONClient(RCON_HOST, port, RCON_PASSWORD, RCON_TIMEOUT)
+            logger.info(f"[DEBUG] Попытка подключения к WebRCON: {RCON_HOST}:{port}")
+            client = WebRCONClient(RCON_HOST, port, RCON_PASSWORD)
             
-            # Подключение
-            if not client.connect():
-                logger.warning(f"[DEBUG] Не удалось подключиться к {RCON_HOST}:{port}")
+            # Подключение через WebSocket
+            if not await client.connect():
+                logger.warning(f"[DEBUG] Не удалось подключиться к WebRCON на {RCON_HOST}:{port}")
                 continue
             
-            logger.debug(f"[DEBUG] Сокет подключен к {RCON_HOST}:{port}")
-            
-            # Аутентификация
-            if not client.authenticate():
-                logger.warning(f"[DEBUG] Не удалось аутентифицироваться на {RCON_HOST}:{port}")
-                client.close()
-                continue
-            
-            logger.debug(f"[DEBUG] Аутентификация успешна на порту {port}")
+            logger.debug(f"[DEBUG] WebSocket подключен к {RCON_HOST}:{port}")
             
             # Проверка подключения командой
-            response = client.send_command("version")
+            response = await client.send_command("version")
             if response:
-                logger.info(f"[DEBUG] ✓ Успешное подключение к RCON на порту {port}!")
+                logger.info(f"[DEBUG] ✓ Успешное подключение к WebRCON на порту {port}!")
                 logger.info(f"[DEBUG] Ответ сервера на 'version': {response[:100]}")
-                rcon_client = client
+                webrcon_client = client
                 rcon_port = port
                 return True
             else:
-                logger.warning(f"[DEBUG] Подключение установлено, но команда не выполнена на {port}")
-                client.close()
+                logger.warning(f"[DEBUG] WebRCON подключен, но команда не выполнена на {port}")
+                await client.close()
                 
         except Exception as e:
-            logger.error(f"[DEBUG] Ошибка при подключении к {RCON_HOST}:{port}: {e}")
+            logger.error(f"[DEBUG] Ошибка при подключении к WebRCON {RCON_HOST}:{port}: {e}")
             continue
     
-    logger.error("[DEBUG] Не удалось подключиться к RCON серверу")
+    logger.error("[DEBUG] Не удалось подключиться к WebRCON серверу")
+    logger.error("[DEBUG] Убедитесь, что в Startup Command установлено: +rcon.web true")
     return False
 
 
 async def send_rcon_command(command: str):
     """
-    Отправка команды на RCON сервер через самописную реализацию
+    Отправка команды на RCON сервер через WebRCON (WebSocket)
     """
-    global rcon_client
+    global webrcon_client
     
     try:
         # Проверяем наличие подключения
-        if rcon_client is None:
-            logger.debug(f"[DEBUG] RCON клиент не подключен, пытаемся подключиться...")
+        if webrcon_client is None or webrcon_client.websocket is None:
+            logger.debug(f"[DEBUG] WebRCON клиент не подключен, пытаемся подключиться...")
             success = await connect_to_rcon()
             if not success:
-                logger.error(f"[DEBUG] Не удалось подключиться к RCON серверу")
+                logger.error(f"[DEBUG] Не удалось подключиться к WebRCON серверу")
                 return None
         
-        if rcon_client is None:
-            logger.error(f"[DEBUG] RCON клиент все еще не подключен")
+        if webrcon_client is None or webrcon_client.websocket is None:
+            logger.error(f"[DEBUG] WebRCON клиент все еще не подключен")
             return None
         
-        # Отправка команды через executor для избежания блокировки
-        logger.debug(f"[DEBUG] Отправка команды '{command}' на RCON сервер")
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            rcon_client.send_command,
-            command
-        )
+        # Отправка команды через WebRCON
+        logger.debug(f"[DEBUG] Отправка команды '{command}' на WebRCON сервер")
+        response = await webrcon_client.send_command(command)
         
         if response:
             logger.debug(f"[DEBUG] Получен ответ на команду '{command}': {len(response)} символов")
@@ -649,16 +645,16 @@ async def rcon_reconnect(ctx):
     """
     Команда для переподключения к RCON серверу
     """
-    global rcon_client, rcon_port
+    global webrcon_client, rcon_port
     
-    logger.info("[DEBUG] Запрос на переподключение к RCON")
+    logger.info("[DEBUG] Запрос на переподключение к WebRCON")
     
-    await ctx.send("🔄 [DEBUG] Попытка переподключения к RCON серверу...")
+    await ctx.send("🔄 [DEBUG] Попытка переподключения к WebRCON серверу...")
     
     # Закрываем текущее подключение
-    if rcon_client:
-        rcon_client.close()
-        rcon_client = None
+    if webrcon_client:
+        await webrcon_client.close()
+        webrcon_client = None
     
     success = await connect_to_rcon()
     
@@ -667,15 +663,15 @@ async def rcon_reconnect(ctx):
         response = await send_rcon_command("version")
         if response:
             await ctx.send(
-                f"✅ **RCON переподключен успешно!**\n"
+                f"✅ **WebRCON переподключен успешно!**\n"
                 f"**Хост:** {RCON_HOST}\n"
                 f"**Порт:** {rcon_port or 'неизвестен'}\n"
                 f"**Статус:** Работает\n\n"
-                f"🔍 [DEBUG] Подключение установлено через самописный RCON клиент"
+                f"🔍 [DEBUG] Подключение установлено через WebRCON (WebSocket)"
             )
         else:
             await ctx.send(
-                f"⚠️ **RCON подключение установлено, но команды не выполняются**\n"
+                f"⚠️ **WebRCON подключение установлено, но команды не выполняются**\n"
                 f"**Хост:** {RCON_HOST}\n"
                 f"**Порт:** {rcon_port or 'неизвестен'}\n"
                 f"**Статус:** Проблемы с выполнением команд\n\n"
@@ -683,11 +679,12 @@ async def rcon_reconnect(ctx):
             )
     else:
         await ctx.send(
-            f"❌ **RCON не подключен**\n"
+            f"❌ **WebRCON не подключен**\n"
             f"**Хост:** {RCON_HOST}\n"
-            f"**RCON порты для попытки:** {', '.join(map(str, RCON_PORTS))}\n"
+            f"**Порты для попытки:** {', '.join(map(str, RCON_PORTS))}\n"
             f"**Статус:** Отключен\n\n"
-            f"🔍 [DEBUG] Используется только обычный RCON (TCP), без WebRCON\n"
+            f"🔍 [DEBUG] Используется только WebRCON (WebSocket)\n"
+            f"🔍 [DEBUG] Убедитесь, что в Startup Command установлено: +rcon.web true\n"
             f"Проверьте логи для деталей."
         )
 
@@ -697,22 +694,22 @@ async def rcon_status(ctx):
     """
     Команда для проверки статуса RCON подключения
     """
-    global rcon_client, rcon_port
+    global webrcon_client, rcon_port
     
-    if rcon_client and rcon_client.sock:
+    if webrcon_client and webrcon_client.websocket:
         # Проверяем подключение отправкой тестовой команды
         response = await send_rcon_command("version")
         if response:
             await ctx.send(
-                f"✅ **RCON подключен**\n"
+                f"✅ **WebRCON подключен**\n"
                 f"**Хост:** {RCON_HOST}\n"
-                f"**RCON порт:** {rcon_port}\n"
+                f"**Порт:** {rcon_port}\n"
                 f"**Статус:** Активно\n\n"
-                f"🔍 [DEBUG] Подключение установлено через самописный RCON клиент"
+                f"🔍 [DEBUG] Подключение установлено через WebRCON (WebSocket)"
             )
         else:
             await ctx.send(
-                f"⚠️ **RCON подключение установлено, но команды не выполняются**\n"
+                f"⚠️ **WebRCON подключение установлено, но команды не выполняются**\n"
                 f"**Хост:** {RCON_HOST}\n"
                 f"**Порт:** {rcon_port or 'неизвестен'}\n"
                 f"**Статус:** Проблемы с выполнением команд\n\n"
@@ -720,11 +717,12 @@ async def rcon_status(ctx):
             )
     else:
         await ctx.send(
-            f"❌ **RCON не подключен**\n"
+            f"❌ **WebRCON не подключен**\n"
             f"**Хост:** {RCON_HOST}\n"
-            f"**RCON порты для попытки:** {', '.join(map(str, RCON_PORTS))}\n"
+            f"**Порты для попытки:** {', '.join(map(str, RCON_PORTS))}\n"
             f"**Статус:** Отключен\n\n"
-            f"🔍 [DEBUG] Используется только обычный RCON (TCP), без WebRCON\n"
+            f"🔍 [DEBUG] Используется только WebRCON (WebSocket)\n"
+            f"🔍 [DEBUG] Убедитесь, что в Startup Command установлено: +rcon.web true\n"
             f"Используйте `!rcon_reconnect` для переподключения."
         )
 
