@@ -22,7 +22,9 @@ from config.config import (
     CHANNELS,
     DB_URL,
     BOT_ACTIVITY_NAME,
-    BOT_ACTIVITY_TYPE
+    BOT_ACTIVITY_TYPE,
+    CONSOLE_LOGS_ENABLED,
+    CONSOLE_LOGS_FILTERS
 )
 from src.database.models import Database
 from src.rcon.rcon_manager import RCONManager
@@ -204,6 +206,37 @@ async def on_ready():
         
         if success:
             logger.info(f"✓ RCON подключен на порту {rcon_manager.connected_port}")
+            
+            # Настройка прослушивания консоли
+            if CONSOLE_LOGS_ENABLED:
+                async def console_log_handler(message: str):
+                    """Обработчик сообщений консоли"""
+                    try:
+                        # Фильтрация по ключевым словам (если настроены)
+                        if CONSOLE_LOGS_FILTERS:
+                            message_lower = message.lower()
+                            if not any(filter_word in message_lower for filter_word in CONSOLE_LOGS_FILTERS):
+                                return  # Пропускаем сообщение, если не содержит ключевых слов
+                        
+                        # Отправка в Discord канал (если настроен)
+                        channel_id = CHANNELS.get('CONSOLE_LOGS')
+                        if channel_id:
+                            for guild in bot.guilds:
+                                channel = guild.get_channel(channel_id)
+                                if isinstance(channel, discord.TextChannel):
+                                    # Обрезаем длинные сообщения (Discord лимит 2000 символов)
+                                    msg = message[:1950] if len(message) > 1950 else message
+                                    await channel.send(f"```\n{msg}\n```")
+                                    break
+                        
+                        # Логирование в файл
+                        logger.debug(f"Консоль: {message[:100]}")
+                    except Exception as e:
+                        logger.error(f"Ошибка обработки лога консоли: {e}")
+                
+                rcon_manager.set_console_callback(console_log_handler)
+                logger.info("✓ Прослушивание консоли включено")
+            
             await bot.change_presence(
                 activity=discord.Activity(
                     type=activity_type,

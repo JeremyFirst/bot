@@ -93,4 +93,14 @@ class RCONManager:
     def is_connected(self) -> bool:
         """Проверка, подключен ли клиент"""
         return self.client is not None and self.client.websocket is not None
+    
+    def set_console_callback(self, callback):
+        """
+        Установка callback для обработки сообщений консоли
+        
+        Args:
+            callback: Асинхронная функция для обработки сообщений консоли
+        """
+        if self.client:
+            self.client.set_console_callback(callback)
 

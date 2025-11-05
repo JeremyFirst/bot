@@ -91,7 +91,17 @@ else:
 CHANNELS = {
     'ADMIN_LOGS': channels_env.get('ADMIN_LOGS', 0) if isinstance(channels_env.get('ADMIN_LOGS'), int) else int(channels_env.get('ADMIN_LOGS', 0)),
     'WARNINGS_CHANNEL': channels_env.get('WARNINGS_CHANNEL', 0) if isinstance(channels_env.get('WARNINGS_CHANNEL'), int) else int(channels_env.get('WARNINGS_CHANNEL', 0)),
+    'CONSOLE_LOGS': channels_env.get('CONSOLE_LOGS', 0) if isinstance(channels_env.get('CONSOLE_LOGS'), int) else int(channels_env.get('CONSOLE_LOGS', 0)),
 }
+
+# Настройки логирования консоли
+console_logs_enabled_raw = get_config('CONSOLE_LOGS_ENABLED', os.getenv('CONSOLE_LOGS_ENABLED', 'false')) or 'false'
+CONSOLE_LOGS_ENABLED = str(console_logs_enabled_raw).lower() == 'true'
+console_logs_filters_raw = get_config('CONSOLE_LOGS_FILTERS', os.getenv('CONSOLE_LOGS_FILTERS', '')) or ''
+if console_logs_filters_raw:
+    CONSOLE_LOGS_FILTERS = [f.strip().lower() for f in str(console_logs_filters_raw).split(',') if f.strip()]
+else:
+    CONSOLE_LOGS_FILTERS = []  # Пустой список = логировать все
 
 # Маппинг групп к ролям Discord (group_name -> discord_role_id)
 ROLE_MAPPINGS: Dict[str, int] = {}
