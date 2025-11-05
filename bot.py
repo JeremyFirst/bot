@@ -259,22 +259,84 @@ class RCONClient:
             return None
         
         try:
+            # Сохраняем ID команды для проверки ответа
+            command_id = self.request_id + 1
+            
             # Отправка команды
             command_packet = self._create_packet(
                 self.SERVERDATA_EXECCOMMAND,
                 command.encode('utf-8')
             )
+            logger.debug(f"Отправка команды '{command}' (ID: {command_id})")
             self.sock.send(command_packet)
             
-            # Получение ответа
-            response = self._read_packet()
+            # Rust может отправлять несколько пакетов в ответ
+            # Читаем все пакеты и собираем ответ
+            response_parts = []
+            original_timeout = self.sock.gettimeout()
+            self.sock.settimeout(10)  # 10 секунд на получение ответа
             
-            if response and response['type'] == self.SERVERDATA_RESPONSE_VALUE:
-                return response['body'].decode('utf-8', errors='ignore')
-            
-            return None
+            try:
+                # Читаем первый пакет ответа
+                response = self._read_packet()
+                if not response:
+                    logger.warning("Не получен ответ на команду")
+                    self.sock.settimeout(original_timeout)
+                    return None
+                
+                logger.debug(f"Получен пакет ответа: ID={response.get('id')}, Type={response.get('type')}")
+                
+                # Проверяем, что это ответ на нашу команду
+                if response['id'] == command_id and response['type'] == self.SERVERDATA_RESPONSE_VALUE:
+                    # Добавляем тело ответа
+                    body = response['body'].decode('utf-8', errors='ignore')
+                    if body:
+                        response_parts.append(body)
+                
+                # Пробуем прочитать дополнительные пакеты (Rust может отправлять несколько)
+                try:
+                    self.sock.settimeout(1)  # Короткий таймаут для дополнительных пакетов
+                    while True:
+                        extra_packet = self._read_packet()
+                        if not extra_packet:
+                            break
+                        
+                        # Игнорируем Type=4 и другие служебные пакеты
+                        if extra_packet.get('type') == self.SERVERDATA_UNKNOWN:
+                            logger.debug("Получен служебный пакет Type=4, игнорируем")
+                            continue
+                        
+                        # Если это ответ на нашу команду, добавляем его
+                        if extra_packet['id'] == command_id and extra_packet['type'] == self.SERVERDATA_RESPONSE_VALUE:
+                            body = extra_packet['body'].decode('utf-8', errors='ignore')
+                            if body:
+                                response_parts.append(body)
+                        else:
+                            logger.debug(f"Получен пакет с другим ID или типом: ID={extra_packet.get('id')}, Type={extra_packet.get('type')}")
+                except socket.timeout:
+                    # Нет дополнительных пакетов - это нормально
+                    pass
+                except Exception as e:
+                    logger.debug(f"Ошибка при чтении дополнительных пакетов: {e}")
+                
+                self.sock.settimeout(original_timeout)
+                
+                # Объединяем все части ответа
+                if response_parts:
+                    full_response = ''.join(response_parts)
+                    logger.debug(f"Получен полный ответ на команду '{command}': {len(full_response)} символов")
+                    return full_response
+                else:
+                    logger.warning(f"Получен ответ, но тело пустое")
+                    return None
+                    
+            except socket.timeout:
+                logger.error(f"Таймаут при ожидании ответа на команду '{command}'")
+                self.sock.settimeout(original_timeout)
+                return None
+                
         except Exception as e:
-            logger.error(f"Ошибка при отправке команды: {e}")
+            logger.error(f"Ошибка при отправке команды '{command}': {e}")
             return None
     
     def close(self):
@@ -462,29 +524,57 @@ async def connect_to_rcon():
             response = await loop.run_in_executor(None, create_and_test)
             
             if response:
-                logger.info(f"✓ Успешное подключение через python-rcon на порту {port}!")
+                logger.info(f"✓ Библиотека rcon успешно подключилась к {RCON_HOST}:{port}!")
                 logger.info(f"Ответ сервера на 'version': {response[:100] if response else 'пустой ответ'}")
-                # Библиотека rcon использует контекстный менеджер, поэтому создаем клиент заново для постоянного использования
-                # Но для постоянного использования нужно использовать другой подход
-                # Пока оставляем самописную реализацию как основную, библиотеку используем только для проверки
-                logger.info("Библиотека rcon работает, но используем самописную реализацию для постоянного подключения")
+                # Библиотека rcon работает, но падает на Type=4 пакетах от Rust
+                # Используем самописную реализацию для постоянного подключения
+                logger.info("Переключаемся на самописную реализацию для постоянного подключения...")
                 # Пробуем подключиться самописным клиентом на этом порту
                 client = RCONClient(RCON_HOST, port, RCON_PASSWORD, RCON_TIMEOUT)
                 if client.connect() and client.authenticate():
                     test_response = client.send_command("version")
                     if test_response:
+                        logger.info(f"✓ Успешное подключение через самописный RCON клиент на порту {port}!")
                         rcon_client = client
                         use_rcon_library = False
                         use_webrcon = False
                         rcon_port = port
                         return True
                     else:
+                        logger.warning("Самописный клиент подключился, но команда не выполнилась")
                         client.close()
                 else:
+                    logger.warning("Не удалось подключиться через самописный клиент")
                     if client.sock:
                         client.close()
+            else:
+                logger.debug("Библиотека rcon подключилась, но не получила ответ на команду")
         except Exception as e:
-            logger.warning(f"Не удалось подключиться через python-rcon к {RCON_HOST}:{port}: {e}")
+            error_msg = str(e)
+            # Игнорируем ошибку Type=4, так как это особенность Rust RCON
+            if "4 is not a valid Type" in error_msg:
+                logger.debug(f"Библиотека rcon получила Type=4 пакет (особенность Rust), пробуем самописную реализацию")
+                # Пробуем самописную реализацию на этом порту
+                try:
+                    client = RCONClient(RCON_HOST, port, RCON_PASSWORD, RCON_TIMEOUT)
+                    if client.connect() and client.authenticate():
+                        test_response = client.send_command("version")
+                        if test_response:
+                            logger.info(f"✓ Успешное подключение через самописный RCON клиент на порту {port}!")
+                            rcon_client = client
+                            use_rcon_library = False
+                            use_webrcon = False
+                            rcon_port = port
+                            return True
+                        else:
+                            client.close()
+                    else:
+                        if client.sock:
+                            client.close()
+                except Exception as e2:
+                    logger.debug(f"Самописная реализация также не сработала: {e2}")
+            else:
+                logger.warning(f"Не удалось подключиться через python-rcon к {RCON_HOST}:{port}: {e}")
             continue
     
     # Если WebRCON принудительно включен, пробуем его первым
