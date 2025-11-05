@@ -1,0 +1,140 @@
+"""
+Конфигурация бота
+Поддерживает загрузку из YAML файла (config.yaml) или переменных окружения (.env)
+Приоритет: YAML файл > переменные окружения > значения по умолчанию
+"""
+import os
+from pathlib import Path
+from typing import List, Dict, Optional
+import yaml
+
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения на случай, если YAML не используется
+load_dotenv()
+
+# Путь к файлу конфигурации
+CONFIG_FILE = Path(__file__).parent / "config.yaml"
+CONFIG_DATA = {}
+
+# Загружаем YAML конфигурацию если файл существует
+if CONFIG_FILE.exists():
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            CONFIG_DATA = yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"Предупреждение: Не удалось загрузить config.yaml: {e}")
+        CONFIG_DATA = {}
+
+
+def get_config(key: str, default=None, env_key: str = None):
+    """
+    Получить значение конфигурации
+    Приоритет: YAML > переменные окружения > значение по умолчанию
+    """
+    # Пробуем YAML
+    if key in CONFIG_DATA:
+        return CONFIG_DATA[key]
+    
+    # Пробуем переменные окружения
+    env_key = env_key or key
+    env_value = os.getenv(env_key)
+    if env_value is not None:
+        return env_value
+    
+    # Возвращаем значение по умолчанию
+    return default
+
+
+# Discord
+DISCORD_TOKEN = get_config('DISCORD_TOKEN', os.getenv('DISCORD_TOKEN', ''))
+
+# RCON (WebRCON)
+RCON_HOST = get_config('RCON_HOST', os.getenv('RCON_HOST', 'localhost'))
+RCON_PORT = int(get_config('RCON_PORT', os.getenv('RCON_PORT', '28016')))
+RCON_PASS = get_config('RCON_PASS', os.getenv('RCON_PASS', ''))
+
+# База данных (MariaDB/MySQL)
+DB_URL = get_config('DB_URL', os.getenv('DB_URL', 'mysql://user:password@localhost:3306/rustbot'))
+
+# Категории администрации
+admin_categories_env = os.getenv('ADMIN_ROLE_CATEGORIES', '')
+admin_categories_yaml = CONFIG_DATA.get('ADMIN_ROLE_CATEGORIES', [])
+if admin_categories_yaml:
+    ADMIN_ROLE_CATEGORIES = admin_categories_yaml if isinstance(admin_categories_yaml, list) else [admin_categories_yaml]
+elif admin_categories_env:
+    ADMIN_ROLE_CATEGORIES = admin_categories_env.split(',')
+else:
+    ADMIN_ROLE_CATEGORIES = ['Старшая Администрация', 'Младшая Администрация']
+
+# Каналы Discord
+channels_yaml = CONFIG_DATA.get('CHANNELS', {})
+channels_env = {}
+if channels_yaml:
+    channels_env = channels_yaml
+else:
+    channels_env = {
+        'ADMIN_LOGS': int(os.getenv('CHANNEL_ADMIN_LOGS', '0')),
+        'WARNINGS_CHANNEL': int(os.getenv('CHANNEL_WARNINGS', '0')),
+    }
+
+CHANNELS = {
+    'ADMIN_LOGS': channels_env.get('ADMIN_LOGS', 0) if isinstance(channels_env.get('ADMIN_LOGS'), int) else int(channels_env.get('ADMIN_LOGS', 0)),
+    'WARNINGS_CHANNEL': channels_env.get('WARNINGS_CHANNEL', 0) if isinstance(channels_env.get('WARNINGS_CHANNEL'), int) else int(channels_env.get('WARNINGS_CHANNEL', 0)),
+}
+
+# Маппинг групп к ролям Discord (group_name -> discord_role_id)
+ROLE_MAPPINGS: Dict[str, int] = {}
+
+# Загружаем из YAML
+role_mappings_yaml = CONFIG_DATA.get('ROLE_MAPPINGS', {})
+if role_mappings_yaml:
+    ROLE_MAPPINGS = {str(k): int(v) for k, v in role_mappings_yaml.items()}
+else:
+    # Загружаем из переменных окружения (ROLE_MAPPINGS_adminl1=123456789)
+    for key, value in os.environ.items():
+        if key.startswith('ROLE_MAPPINGS_'):
+            group_name = key.replace('ROLE_MAPPINGS_', '')
+            try:
+                ROLE_MAPPINGS[group_name] = int(value)
+            except ValueError:
+                pass
+
+# Иерархия групп (от высшей к низшей)
+group_hierarchy_yaml = CONFIG_DATA.get('GROUP_HIERARCHY', [])
+if group_hierarchy_yaml:
+    GROUP_HIERARCHY = group_hierarchy_yaml if isinstance(group_hierarchy_yaml, list) else [group_hierarchy_yaml]
+else:
+    GROUP_HIERARCHY = os.getenv('GROUP_HIERARCHY', 'owner,admin,adminl1,moderator,moder,helper').split(',')
+
+# Все возможные варианты названий групп в ответах RCON
+group_name_db_yaml = CONFIG_DATA.get('GROUP_NAME_DATABASE', [])
+if group_name_db_yaml:
+    GROUP_NAME_DATABASE = group_name_db_yaml if isinstance(group_name_db_yaml, list) else [group_name_db_yaml]
+else:
+    GROUP_NAME_DATABASE = os.getenv('GROUP_NAME_DATABASE', 'moderator,moder,adminl1,admin,owner,helper').split(',')
+
+# Лимиты выговоров
+punishment_limits_yaml = CONFIG_DATA.get('PUNISHMENT_LIMITS', {})
+if punishment_limits_yaml:
+    PUNISHMENT_LIMITS = {
+        'recruitment': int(punishment_limits_yaml.get('recruitment', 3)),
+        'donat': int(punishment_limits_yaml.get('donat', 2)),
+    }
+else:
+    PUNISHMENT_LIMITS = {
+        'recruitment': int(os.getenv('PUNISHMENT_LIMIT_RECRUITMENT', '3')),
+        'donat': int(os.getenv('PUNISHMENT_LIMIT_DONAT', '2')),
+    }
+
+# Ссылка для предложения покупки привилегии
+PURCHASE_LINK = get_config('PURCHASE_LINK', os.getenv('PURCHASE_LINK', 'https://example.com/buy'))
+
+# Настройки логирования
+LOG_FILE = get_config('LOG_FILE', os.getenv('LOG_FILE', 'logs/bot.log'))
+LOG_LEVEL = get_config('LOG_LEVEL', os.getenv('LOG_LEVEL', 'INFO'))
+
+# Настройки планировщика
+SCHEDULER_CHECK_INTERVAL = int(get_config('SCHEDULER_CHECK_INTERVAL', os.getenv('SCHEDULER_CHECK_INTERVAL', '60')))
+PRIVILEGE_REMOVAL_RETRY_DELAY = int(get_config('PRIVILEGE_REMOVAL_RETRY_DELAY', os.getenv('PRIVILEGE_REMOVAL_RETRY_DELAY', '120')))
+MAX_REMOVAL_RETRIES = int(get_config('MAX_REMOVAL_RETRIES', os.getenv('MAX_REMOVAL_RETRIES', '3')))

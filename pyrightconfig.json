@@ -1,1 +1,19 @@
-
+{
+  "include": [
+    "src",
+    "config",
+    "database"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "legacy",
+    ".venv",
+    "venv",
+    "env"
+  ],
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": false,
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic"
+}
