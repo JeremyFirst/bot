@@ -518,16 +518,53 @@ async def connect_to_rcon():
                     with Client(RCON_HOST, port, passwd=RCON_PASSWORD) as client:
                         return client.run("version")
                 except Exception as e:
+                    error_msg = str(e)
+                    # Если это ошибка Type=4, это означает что библиотека подключилась, но не может обработать Rust пакеты
+                    if "4 is not a valid Type" in error_msg or "is not a valid Type" in error_msg:
+                        logger.debug(f"Библиотека rcon получила нестандартный пакет Type=4 (особенность Rust)")
+                        # Возвращаем специальное значение, чтобы попробовать самописную реализацию
+                        return "LIBRARY_CONNECTED_BUT_TYPE4_ERROR"
                     logger.debug(f"Ошибка при создании/тестировании клиента rcon: {e}")
                     return None
             
             response = await loop.run_in_executor(None, create_and_test)
             
-            if response:
+            # Если библиотека получила ошибку Type=4, это означает что подключение работает
+            # но библиотека не может обработать Rust пакеты - пробуем самописную реализацию
+            if response == "LIBRARY_CONNECTED_BUT_TYPE4_ERROR" or not response:
+                logger.info(f"Библиотека rcon не смогла обработать ответ Rust сервера, пробуем самописную реализацию на порту {port}")
+                # Пробуем самописную реализацию
+                try:
+                    logger.info(f"Попытка подключения через самописный RCON клиент к {RCON_HOST}:{port}")
+                    client = RCONClient(RCON_HOST, port, RCON_PASSWORD, RCON_TIMEOUT)
+                    if client.connect():
+                        logger.info(f"Сокет подключен, пробуем аутентификацию...")
+                        if client.authenticate():
+                            logger.info(f"Аутентификация успешна, пробуем команду version...")
+                            test_response = client.send_command("version")
+                            if test_response:
+                                logger.info(f"✓ Успешное подключение через самописный RCON клиент на порту {port}!")
+                                logger.info(f"Ответ сервера на 'version': {test_response[:100]}")
+                                rcon_client = client
+                                use_rcon_library = False
+                                use_webrcon = False
+                                rcon_port = port
+                                return True
+                            else:
+                                logger.warning(f"Команда 'version' не вернула ответ")
+                                client.close()
+                        else:
+                            logger.warning(f"Аутентификация не удалась")
+                            if client.sock:
+                                client.close()
+                    else:
+                        logger.warning(f"Не удалось подключить сокет")
+                except Exception as e2:
+                    logger.warning(f"Самописная реализация также не сработала: {e2}")
+            elif response:
+                # Библиотека успешно получила ответ, но для постоянного использования лучше самописная
                 logger.info(f"✓ Библиотека rcon успешно подключилась к {RCON_HOST}:{port}!")
                 logger.info(f"Ответ сервера на 'version': {response[:100] if response else 'пустой ответ'}")
-                # Библиотека rcon работает, но падает на Type=4 пакетах от Rust
-                # Используем самописную реализацию для постоянного подключения
                 logger.info("Переключаемся на самописную реализацию для постоянного подключения...")
                 # Пробуем подключиться самописным клиентом на этом порту
                 client = RCONClient(RCON_HOST, port, RCON_PASSWORD, RCON_TIMEOUT)
@@ -547,34 +584,41 @@ async def connect_to_rcon():
                     logger.warning("Не удалось подключиться через самописный клиент")
                     if client.sock:
                         client.close()
-            else:
-                logger.debug("Библиотека rcon подключилась, но не получила ответ на команду")
         except Exception as e:
             error_msg = str(e)
             # Игнорируем ошибку Type=4, так как это особенность Rust RCON
-            if "4 is not a valid Type" in error_msg:
-                logger.debug(f"Библиотека rcon получила Type=4 пакет (особенность Rust), пробуем самописную реализацию")
+            if "4 is not a valid Type" in error_msg or "is not a valid Type" in error_msg:
+                logger.info(f"Библиотека rcon получила нестандартный пакет (особенность Rust), пробуем самописную реализацию на порту {port}")
                 # Пробуем самописную реализацию на этом порту
                 try:
+                    logger.info(f"Попытка подключения через самописный RCON клиент к {RCON_HOST}:{port}")
                     client = RCONClient(RCON_HOST, port, RCON_PASSWORD, RCON_TIMEOUT)
-                    if client.connect() and client.authenticate():
-                        test_response = client.send_command("version")
-                        if test_response:
-                            logger.info(f"✓ Успешное подключение через самописный RCON клиент на порту {port}!")
-                            rcon_client = client
-                            use_rcon_library = False
-                            use_webrcon = False
-                            rcon_port = port
-                            return True
+                    if client.connect():
+                        logger.info(f"Сокет подключен, пробуем аутентификацию...")
+                        if client.authenticate():
+                            logger.info(f"Аутентификация успешна, пробуем команду version...")
+                            test_response = client.send_command("version")
+                            if test_response:
+                                logger.info(f"✓ Успешное подключение через самописный RCON клиент на порту {port}!")
+                                logger.info(f"Ответ сервера на 'version': {test_response[:100]}")
+                                rcon_client = client
+                                use_rcon_library = False
+                                use_webrcon = False
+                                rcon_port = port
+                                return True
+                            else:
+                                logger.warning(f"Команда 'version' не вернула ответ")
+                                client.close()
                         else:
-                            client.close()
+                            logger.warning(f"Аутентификация не удалась")
+                            if client.sock:
+                                client.close()
                     else:
-                        if client.sock:
-                            client.close()
+                        logger.warning(f"Не удалось подключить сокет")
                 except Exception as e2:
-                    logger.debug(f"Самописная реализация также не сработала: {e2}")
+                    logger.warning(f"Самописная реализация также не сработала: {e2}")
             else:
-                logger.warning(f"Не удалось подключиться через python-rcon к {RCON_HOST}:{port}: {e}")
+                logger.debug(f"Не удалось подключиться через python-rcon к {RCON_HOST}:{port}: {e}")
             continue
     
     # Если WebRCON принудительно включен, пробуем его первым
