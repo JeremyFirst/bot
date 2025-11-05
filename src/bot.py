@@ -79,7 +79,7 @@ async def on_ready():
         await db.connect()
         logger.info("✓ База данных подключена")
         
-        # Проверка наличия таблиц
+        # Проверка и автоматическое применение схемы БД
         try:
             if db.pool:
                 async with db.pool.acquire() as conn:
@@ -89,12 +89,44 @@ async def on_ready():
                         table_count = result[0] if result else 0
                         if table_count == 0:
                             logger.warning("⚠️ Таблицы в базе данных не найдены!")
-                            logger.warning("Примените схему базы данных:")
-                            logger.warning("  python3 database/apply_schema.py")
-                            logger.warning("  или")
-                            logger.warning(f"  mysql -u {db.config['user']} -p {db.config['db']} < database/schema.sql")
+                            logger.info("Применение схемы базы данных автоматически...")
+                            
+                            # Читаем схему из файла
+                            schema_file = Path(__file__).parent.parent / "database" / "schema.sql"
+                            if schema_file.exists():
+                                with open(schema_file, 'r', encoding='utf-8') as f:
+                                    schema_sql = f.read()
+                                
+                                # Разбиваем SQL на отдельные команды
+                                commands = [
+                                    cmd.strip() 
+                                    for cmd in schema_sql.split(';') 
+                                    if cmd.strip() and not cmd.strip().startswith('--')
+                                ]
+                                
+                                # Выполняем команды
+                                for command in commands:
+                                    if command:
+                                        try:
+                                            await cursor.execute(command)
+                                            logger.debug(f"✓ Выполнено: {command[:50]}...")
+                                        except Exception as e:
+                                            # Игнорируем ошибки "table already exists"
+                                            error_str = str(e).lower()
+                                            if "already exists" in error_str or "duplicate" in error_str:
+                                                logger.debug(f"ℹ️ Пропущено (уже существует): {command[:50]}...")
+                                            else:
+                                                logger.warning(f"⚠️ Ошибка при выполнении команды: {e}")
+                                                logger.warning(f"   Команда: {command[:100]}")
+                                
+                                await conn.commit()
+                                logger.info("✅ Схема базы данных успешно применена!")
+                            else:
+                                logger.error(f"❌ Файл схемы не найден: {schema_file}")
+                                logger.warning("Примените схему вручную через MySQL:")
+                                logger.warning(f"  mysql -u {db.config['user']} -p {db.config['db']} < database/schema.sql")
         except Exception as e:
-            logger.warning(f"Не удалось проверить таблицы: {e}")
+            logger.warning(f"Не удалось проверить/применить схему БД: {e}")
         
         # Инициализация RCON менеджера
         logger.info("Инициализация RCON подключения...")
