@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 import re
+from typing import Optional
 
 from config.config import ROLE_MAPPINGS, CHANNELS, PURCHASE_LINK
 from src.rcon.rcon_manager import RCONManager
@@ -44,12 +45,25 @@ class PrivilegeCommands(commands.Cog):
         self,
         interaction: discord.Interaction,
         steamid: str,
-        user: discord.Member = None
+        user: Optional[discord.Member] = None
     ):
         """Команда /addprivilege - выдача привилегий"""
         try:
+            if not interaction.guild:
+                await interaction.response.send_message("Эта команда доступна только на сервере", ephemeral=True)
+                return
+            
             # Определяем Discord пользователя
-            discord_user = user or interaction.user
+            if user:
+                discord_user = user
+            elif isinstance(interaction.user, discord.Member):
+                discord_user = interaction.user
+            else:
+                # Если interaction.user не Member, получаем его из гильдии
+                discord_user = interaction.guild.get_member(interaction.user.id)
+                if not discord_user:
+                    await interaction.response.send_message("Не удалось найти пользователя на сервере", ephemeral=True)
+                    return
             
             if not interaction.guild:
                 await interaction.response.send_message(
@@ -169,22 +183,39 @@ class PrivilegeCommands(commands.Cog):
                     f"⚠️ Не найден маппинг роли для группы `{group_name}`. Пользователь: {discord_user.mention}"
                 )
             
+            # Получаем executor как Member
+            executor = interaction.user
+            if not isinstance(executor, discord.Member) and interaction.guild:
+                executor = interaction.guild.get_member(executor.id) or executor
+            
             # Создаем Embed с результатом
+            executor_member = executor if isinstance(executor, discord.Member) else discord_user
             embed = create_privilege_added_embed(
                 discord_user,
                 steamid,
                 group_name,
                 expires_at_msk,
-                interaction.user,
+                executor_member,
                 permanent
             )
             
             await interaction.followup.send(embed=embed)
             
+            # Отправляем ЛС пользователю
+            try:
+                dm_embed = embed.copy()
+                dm_embed.set_footer(text="Сохраните это сообщение, чтобы не потерять информацию о привилегии")
+                await discord_user.send(embed=dm_embed)
+                logger.info(f"ЛС отправлено пользователю {discord_user.id} о выдаче привилегии {group_name}")
+            except discord.Forbidden:
+                logger.warning(f"Не удалось отправить ЛС пользователю {discord_user.id} (закрыты ЛС)")
+            except Exception as e:
+                logger.error(f"Ошибка отправки ЛС пользователю {discord_user.id}: {e}")
+            
             # Логируем в канал
             await self._log_to_channel(
                 interaction.guild,
-                f"✅ Привилегия `{group_name}` выдана пользователю {discord_user.mention} (SteamID: {steamid})"
+                f"Привилегия `{group_name}` выдана пользователю {discord_user.mention} (SteamID: {steamid})"
             )
             
         except Exception as e:
@@ -200,7 +231,7 @@ class PrivilegeCommands(commands.Cog):
             channel_id = CHANNELS.get('ADMIN_LOGS')
             if channel_id:
                 channel = guild.get_channel(channel_id)
-                if channel:
+                if channel and isinstance(channel, discord.TextChannel):
                     await channel.send(message)
         except Exception as e:
             logger.error(f"Ошибка логирования в канал: {e}")

@@ -5,6 +5,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
+import asyncio
+from typing import Optional
 
 from config.config import CHANNELS, PUNISHMENT_LIMITS, PURCHASE_LINK, ROLE_MAPPINGS
 from src.utils.embeds import create_warning_embed, create_error_embed
@@ -43,7 +45,7 @@ class WarnCommands(commands.Cog):
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        reason: str = None
+        reason: Optional[str] = None
     ):
         """Команда /warn - выдача выговора"""
         try:
@@ -67,10 +69,16 @@ class WarnCommands(commands.Cog):
             # Получаем количество выговоров
             warnings_count = await self.db.get_warnings_count(user.id, category)
             
+            # Получаем executor как Member
+            executor = interaction.user
+            if not isinstance(executor, discord.Member) and interaction.guild:
+                executor = interaction.guild.get_member(executor.id) or executor
+            
             # Создаем Embed
+            executor_member = executor if isinstance(executor, discord.Member) else user
             embed = create_warning_embed(
                 user,
-                interaction.user,
+                executor_member,
                 reason or "Не указана",
                 warnings_count,
                 limit,
@@ -79,9 +87,9 @@ class WarnCommands(commands.Cog):
             
             # Отправляем в канал предупреждений
             channel_id = CHANNELS.get('WARNINGS_CHANNEL')
-            if channel_id:
+            if channel_id and interaction.guild:
                 channel = interaction.guild.get_channel(channel_id)
-                if channel:
+                if channel and isinstance(channel, discord.TextChannel):
                     await channel.send(f"{user.mention}", embed=embed)
             
             # Отправляем в ЛС пользователю
@@ -138,7 +146,7 @@ class WarnCommands(commands.Cog):
                 logger.error(f"Не удалось получить ответ на removegroup для {steamid}")
                 await self._log_to_channel(
                     guild,
-                    f"❌ Ошибка при снятии прав у {user.mention}: не получен ответ от RCON"
+                    f"Ошибка при снятии прав у {user.mention}: не получен ответ от RCON"
                 )
                 return
             
@@ -169,7 +177,7 @@ class WarnCommands(commands.Cog):
                     logger.warning(f"Группа {group_name} все еще присутствует у пользователя {steamid}")
                     await self._log_to_channel(
                         guild,
-                        f"⚠️ Группа {group_name} все еще присутствует у {user.mention} после removegroup"
+                        f"Группа {group_name} все еще присутствует у {user.mention} после removegroup"
                     )
                     return
             
@@ -192,7 +200,8 @@ class WarnCommands(commands.Cog):
             await self.db.delete_warnings_by_discord(user.id)
             
             # Создаем Embed для уведомления
-            embed = create_privilege_removed_embed(user, reason, PURCHASE_LINK)
+            purchase_link = PURCHASE_LINK or "Не указана"
+            embed = create_privilege_removed_embed(user, reason, purchase_link)
             
             # Отправляем в ЛС
             try:
@@ -203,7 +212,7 @@ class WarnCommands(commands.Cog):
             # Логируем в канал
             await self._log_to_channel(
                 guild,
-                f"🔴 Привилегии сняты у {user.mention} (SteamID: {steamid}, группа: {group_name})\n"
+                f"Привилегии сняты у {user.mention} (SteamID: {steamid}, группа: {group_name})\n"
                 f"Причина: {reason}"
             )
             
@@ -211,7 +220,7 @@ class WarnCommands(commands.Cog):
             logger.error(f"Ошибка при снятии прав из-за выговоров: {e}", exc_info=True)
             await self._log_to_channel(
                 guild,
-                f"❌ Ошибка при снятии прав у {user.mention}: {str(e)}"
+                f"Ошибка при снятии прав у {user.mention}: {str(e)}"
             )
     
     async def _log_to_channel(self, guild: discord.Guild, message: str):
@@ -220,7 +229,7 @@ class WarnCommands(commands.Cog):
             channel_id = CHANNELS.get('ADMIN_LOGS')
             if channel_id:
                 channel = guild.get_channel(channel_id)
-                if channel:
+                if channel and isinstance(channel, discord.TextChannel):
                     await channel.send(message)
         except Exception as e:
             logger.error(f"Ошибка логирования в канал: {e}")

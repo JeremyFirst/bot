@@ -18,7 +18,7 @@ def create_privilege_added_embed(
 ) -> discord.Embed:
     """Embed для успешного добавления привилегии"""
     embed = discord.Embed(
-        title="✅ Привилегия выдана",
+        title="Привилегия выдана",
         color=discord.Color.green(),
         timestamp=datetime.utcnow()
     )
@@ -60,7 +60,7 @@ def create_no_privileges_embed(
 ) -> discord.Embed:
     """Embed для случая, когда у пользователя нет привилегий"""
     embed = discord.Embed(
-        title="❌ У пользователя нет привилегий",
+        title="У пользователя нет привилегий",
         color=discord.Color.red(),
         timestamp=datetime.utcnow()
     )
@@ -121,7 +121,7 @@ def create_warning_embed(
     
     if warnings_count >= limit:
         embed.add_field(
-            name="⚠️ ВНИМАНИЕ",
+            name="ВНИМАНИЕ",
             value=f"Достигнут лимит выговоров! Права будут сняты.",
             inline=False
         )
@@ -133,13 +133,13 @@ def create_warning_embed(
 
 
 def create_privilege_removed_embed(
-    discord_user: discord.Member,
+    discord_user: discord.abc.User,
     reason: str,
     purchase_link: str
 ) -> discord.Embed:
     """Embed для уведомления о снятии прав"""
     embed = discord.Embed(
-        title="🔴 Привилегии сняты",
+        title="Привилегии сняты",
         color=discord.Color.red(),
         timestamp=datetime.utcnow()
     )
@@ -246,7 +246,7 @@ def create_error_embed(
 ) -> discord.Embed:
     """Embed для ошибок"""
     embed = discord.Embed(
-        title=f"❌ {title}",
+        title=f"{title}",
         description=description,
         color=discord.Color.red(),
         timestamp=datetime.utcnow()
@@ -260,7 +260,7 @@ def create_success_embed(
 ) -> discord.Embed:
     """Embed для успешных операций"""
     embed = discord.Embed(
-        title=f"✅ {title}",
+        title=f"{title}",
         description=description,
         color=discord.Color.green(),
         timestamp=datetime.utcnow()

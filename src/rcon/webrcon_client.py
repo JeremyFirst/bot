@@ -95,7 +95,7 @@ class WebRCONClient:
                         timeout=10.0
                     )
                 
-                logger.info(f"✓ WebSocket подключен к {self.host}:{port} (URI: {uri})")
+                logger.info(f"WebSocket подключен к {self.host}:{port} (URI: {uri})")
                 self.uri = uri
                 
                 # Автоматически запускаем listener после подключения

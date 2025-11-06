@@ -173,9 +173,9 @@ async def on_ready():
                                             error_str = str(e).lower()
                                             if "already exists" in error_str or "duplicate" in error_str:
                                                 table_name = command.split('(')[0].split()[-1] if '(' in command else "unknown"
-                                                logger.info(f"ℹ️ Таблица уже существует: {table_name}")
+                                                logger.info(f"Таблица уже существует: {table_name}")
                                             else:
-                                                logger.error(f"❌ Ошибка при создании таблицы: {e}")
+                                                logger.error(f"Ошибка при создании таблицы: {e}")
                                                 logger.error(f"   Команда: {command[:100]}")
                                 
                                 # Затем создаем индексы
@@ -191,10 +191,10 @@ async def on_ready():
                                             error_str = str(e).lower()
                                             if "already exists" in error_str or "duplicate" in error_str:
                                                 index_name = command.split('ON')[0].split()[-1] if 'ON' in command else "unknown"
-                                                logger.debug(f"ℹ️ Индекс уже существует: {index_name}")
+                                                logger.debug(f"Индекс уже существует: {index_name}")
                                             elif "doesn't exist" in error_str:
                                                 # Таблица не существует - это нормально, индекс будет создан позже
-                                                logger.debug(f"ℹ️ Индекс пропущен (таблица не существует): {command[:50]}...")
+                                                logger.debug(f"Индекс пропущен (таблица не существует): {command[:50]}...")
                                             else:
                                                 logger.warning(f"⚠️ Ошибка при создании индекса: {e}")
                                                 logger.warning(f"   Команда: {command[:100]}")
@@ -213,18 +213,18 @@ async def on_ready():
                                         still_missing.append(table_name)
                                 
                                 if still_missing:
-                                    logger.error(f"❌ Не удалось создать таблицы: {', '.join(still_missing)}")
+                                    logger.error(f"Не удалось создать таблицы: {', '.join(still_missing)}")
                                     logger.warning("Примените схему вручную через MySQL:")
                                     logger.warning(f"  mysql -u {db.config['user']} -p {db.config['db']} < database/schema.sql")
                                 else:
-                                    logger.info("✅ Схема базы данных успешно применена!")
-                                    logger.info("✓ Все таблицы успешно созданы")
+                                    logger.info("Схема базы данных успешно применена!")
+                                    logger.info("Все таблицы успешно созданы")
                             else:
-                                logger.error(f"❌ Файл схемы не найден: {schema_file}")
+                                logger.error(f"Файл схемы не найден: {schema_file}")
                                 logger.warning("Примените схему вручную через MySQL:")
                                 logger.warning(f"  mysql -u {db.config['user']} -p {db.config['db']} < database/schema.sql")
                         else:
-                            logger.info("✓ Все таблицы базы данных существуют")
+                            logger.info("Все таблицы базы данных существуют")
         except Exception as e:
             logger.warning(f"Не удалось проверить/применить схему БД: {e}")
         
@@ -331,7 +331,7 @@ async def on_ready():
                     channel = guild.get_channel(channel_id)
                     # Проверяем, что канал - это текстовый канал (TextChannel)
                     if isinstance(channel, discord.TextChannel):
-                        await channel.send("✅ Бот запущен и готов к работе")
+                        await channel.send("Бот запущен и готов к работе")
                         break
             except Exception as e:
                 logger.warning(f"Не удалось отправить сообщение в канал логов: {e}")
@@ -393,12 +393,12 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"❌ Отсутствует обязательный аргумент: {error.param.name}")
+        await ctx.send(f"Отсутствует обязательный аргумент: {error.param.name}")
     elif isinstance(error, commands.BadArgument):
-        await ctx.send(f"❌ Неверный аргумент: {error}")
+        await ctx.send(f"Неверный аргумент: {error}")
     else:
         logger.error(f"Ошибка в команде {ctx.command}: {error}", exc_info=True)
-        await ctx.send(f"❌ Произошла ошибка при выполнении команды: {error}")
+        await ctx.send(f"Произошла ошибка при выполнении команды: {error}")
 
 
 async def cleanup():

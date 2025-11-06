@@ -60,7 +60,8 @@ def parse_pinfo_response(response: str) -> Dict:
     
     # Регулярное выражение для групп с датой
     # Формат: group_name until Day, DD Month YYYY HH:MM UTC
-    pattern = r'([A-Za-z0-9_\-]+)\s+until\s+([A-Za-z]+),\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\s+(\d{2}:\d{2})\s+UTC'
+    # Также поддерживаем формат: Groups: group_name until Day, DD Month YYYY HH:MM UTC
+    pattern = r'(?:Groups?:\s*)?([A-Za-z0-9_\-]+)\s+until\s+([A-Za-z]+),\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\s+(\d{2}:\d{2})\s+UTC'
     
     matches = re.finditer(pattern, clean_response, re.IGNORECASE)
     
@@ -72,6 +73,8 @@ def parse_pinfo_response(response: str) -> Dict:
         year = int(match.group(5))
         time_str = match.group(6)
         
+        logger.debug(f"Найдена группа с датой: {group_name} until {day_of_week}, {day} {month_name} {year} {time_str} UTC")
+        
         # Парсим дату
         expires_at_utc = parse_utc_datetime(day_of_week, time_str, month_name, day, year)
         
@@ -81,6 +84,7 @@ def parse_pinfo_response(response: str) -> Dict:
                 'expires_at_utc': expires_at_utc,
                 'permanent': False
             })
+            logger.debug(f"Добавлена группа: {group_name}, expires_at_utc: {expires_at_utc}")
         else:
             logger.warning(f"Не удалось распарсить дату для группы {group_name}")
     
@@ -108,6 +112,8 @@ def parse_pinfo_response(response: str) -> Dict:
                         'expires_at_utc': None,
                         'permanent': True
                     })
+    
+    logger.debug(f"Парсинг pinfo завершен. Найдено групп: {len(groups)}, группы: {[g['name'] for g in groups]}")
     
     return {
         'has_privileges': len(groups) > 0,

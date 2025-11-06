@@ -222,10 +222,11 @@ class PrivilegeScheduler:
         """Отправка уведомлений пользователю и в канал логов"""
         try:
             # Отправляем ЛС пользователю
+            purchase_link = PURCHASE_LINK or "Не указана"
             embed = create_privilege_removed_embed(
                 user,
                 f"Истек срок действия привилегии {group_name}",
-                PURCHASE_LINK
+                purchase_link
             )
             
             try:
@@ -235,7 +236,7 @@ class PrivilegeScheduler:
             
             # Логируем в канал
             await self._log_to_channel(
-                f"🔴 Автоматическое снятие привилегии `{group_name}` у {user.mention} (ID: {user.id})\n"
+                f"Автоматическое снятие привилегии `{group_name}` у {user.mention} (ID: {user.id})\n"
                 f"Причина: Истек срок действия"
             )
             
@@ -251,7 +252,7 @@ class PrivilegeScheduler:
             
             for guild in self.bot.guilds:
                 channel = guild.get_channel(channel_id)
-                if channel:
+                if channel and isinstance(channel, discord.TextChannel):
                     await channel.send(message)
                     break
         except Exception as e:

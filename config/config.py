@@ -25,10 +25,10 @@ if CONFIG_FILE.exists():
         if CONFIG_DATA:
             print(f"✓ Загружена конфигурация из {CONFIG_FILE}")
     except Exception as e:
-        print(f"⚠️ Предупреждение: Не удалось загрузить config.yaml: {e}")
+        print(f"Предупреждение: Не удалось загрузить config.yaml: {e}")
         CONFIG_DATA = {}
 else:
-    print(f"ℹ️ Файл {CONFIG_FILE} не найден, используются переменные окружения или значения по умолчанию")
+    print(f"Файл {CONFIG_FILE} не найден, используются переменные окружения или значения по умолчанию")
 
 
 def get_config(key: str, default=None, env_key: Optional[str] = None):
