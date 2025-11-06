@@ -176,3 +176,7 @@ MAX_REMOVAL_RETRIES = int(max_retries) if max_retries is not None else 3
 BOT_ACTIVITY_NAME = get_config('BOT_ACTIVITY_NAME', os.getenv('BOT_ACTIVITY_NAME', 'RUST сервер')) or 'RUST сервер'
 bot_activity_type_raw = get_config('BOT_ACTIVITY_TYPE', os.getenv('BOT_ACTIVITY_TYPE', 'watching')) or 'watching'
 BOT_ACTIVITY_TYPE = bot_activity_type_raw.lower() if isinstance(bot_activity_type_raw, str) else 'watching'
+
+# Время автоудаления ephemeral сообщений (в секундах)
+ephemeral_delete_after = get_config('EPHEMERAL_DELETE_AFTER', os.getenv('EPHEMERAL_DELETE_AFTER', '10'))
+EPHEMERAL_DELETE_AFTER = float(ephemeral_delete_after) if ephemeral_delete_after is not None else 10.0

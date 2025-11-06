@@ -7,9 +7,10 @@ from discord.ext import commands
 import logging
 from typing import Optional
 
-from config.config import ADMIN_ROLE_CATEGORIES, ROLE_MAPPINGS
+from config.config import ADMIN_ROLE_CATEGORIES, ROLE_MAPPINGS, EPHEMERAL_DELETE_AFTER
 from src.utils.embeds import create_admin_list_embed, create_error_embed, create_success_embed
 from src.utils.admin_list_manager import AdminListManager, get_admin_members_by_category
+from src.utils.message_utils import send_ephemeral_with_delete
 from src.database.models import Database
 
 logger = logging.getLogger(__name__)
@@ -104,20 +105,22 @@ class AdminCommands(commands.Cog):
                 message = await self.admin_list_manager.publish(interaction.guild)
                 
                 if message:
-                    await interaction.followup.send(
+                    await send_ephemeral_with_delete(
+                        interaction,
                         embed=create_success_embed(
                             "Успешно",
                             f"Сообщение состава администрации опубликовано в канале <#{message.channel.id}>"
                         ),
-                        ephemeral=True
+                        delete_after=EPHEMERAL_DELETE_AFTER
                     )
                 else:
-                    await interaction.followup.send(
+                    await send_ephemeral_with_delete(
+                        interaction,
                         embed=create_error_embed(
                             "Ошибка",
                             "Не удалось опубликовать сообщение. Проверьте настройки канала (ADMIN_LIST_CHANNEL) в конфиге."
                         ),
-                        ephemeral=True
+                        delete_after=EPHEMERAL_DELETE_AFTER
                     )
             
             elif action_lower == "restore":
@@ -127,20 +130,22 @@ class AdminCommands(commands.Cog):
                 message = await self.admin_list_manager.restore(interaction.guild)
                 
                 if message:
-                    await interaction.followup.send(
+                    await send_ephemeral_with_delete(
+                        interaction,
                         embed=create_success_embed(
                             "Успешно",
                             f"Сообщение состава администрации восстановлено в канале <#{message.channel.id}>"
                         ),
-                        ephemeral=True
+                        delete_after=EPHEMERAL_DELETE_AFTER
                     )
                 else:
-                    await interaction.followup.send(
+                    await send_ephemeral_with_delete(
+                        interaction,
                         embed=create_error_embed(
                             "Ошибка",
                             "Не удалось восстановить сообщение. Возможно, оно не было опубликовано ранее."
                         ),
-                        ephemeral=True
+                        delete_after=EPHEMERAL_DELETE_AFTER
                     )
             
             else:
