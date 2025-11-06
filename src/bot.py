@@ -87,7 +87,7 @@ async def on_ready():
         
         # Проверка и автоматическое применение схемы БД
         try:
-            if db.pool:
+            if db.pool is not None:
                 logger.info("Проверка схемы базы данных...")
                 async with db.pool.acquire() as conn:
                     async with conn.cursor() as cursor:
@@ -306,6 +306,8 @@ async def on_ready():
             logger.info("Синхронизация команд с Discord...")
             synced = await bot.tree.sync()
             logger.info(f"✓ Синхронизировано {len(synced)} команд с Discord")
+            if synced:
+                logger.debug(f"Синхронизированные команды: {[cmd.name for cmd in synced]}")
         except Exception as e:
             logger.error(f"Ошибка синхронизации команд: {e}", exc_info=True)
         

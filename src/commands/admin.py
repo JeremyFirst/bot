@@ -70,6 +70,10 @@ class AdminCommands(commands.Cog):
     
     @app_commands.command(name="adminlist", description="Управление сообщением состава администрации")
     @app_commands.describe(action="Действие: publish (опубликовать) или restore (восстановить)")
+    @app_commands.choices(action=[
+        app_commands.Choice(name="publish - Опубликовать сообщение", value="publish"),
+        app_commands.Choice(name="restore - Восстановить сообщение", value="restore")
+    ])
     async def adminlist(
         self,
         interaction: discord.Interaction,
