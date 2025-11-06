@@ -5,17 +5,54 @@ import discord
 import logging
 from typing import Optional
 
-from config.config import ADMIN_ROLE_CATEGORIES, CHANNELS, CATEGORY_ROLE_MAPPINGS
+from config.config import ADMIN_ROLE_CATEGORIES, CHANNELS, CATEGORY_ROLE_MAPPINGS, GROUP_HIERARCHY, ROLE_MAPPINGS
 from src.utils.embeds import create_admin_list_embed
 from src.database.models import Database
 
 logger = logging.getLogger(__name__)
 
 
+def get_role_group_name(role_id: int) -> Optional[str]:
+    """
+    Получить название группы по ID роли Discord через ROLE_MAPPINGS
+    
+    Args:
+        role_id: ID роли Discord
+        
+    Returns:
+        Название группы или None
+    """
+    for group_name, mapped_role_id in ROLE_MAPPINGS.items():
+        if mapped_role_id == role_id:
+            return group_name
+    return None
+
+
+def get_role_priority(role_id: int) -> int:
+    """
+    Получить приоритет роли по GROUP_HIERARCHY (чем меньше индекс, тем выше приоритет)
+    
+    Args:
+        role_id: ID роли Discord
+        
+    Returns:
+        Индекс в GROUP_HIERARCHY или очень большое число, если роль не найдена
+    """
+    group_name = get_role_group_name(role_id)
+    if not group_name:
+        return 999999  # Очень низкий приоритет
+    
+    try:
+        return GROUP_HIERARCHY.index(group_name.lower())
+    except ValueError:
+        return 999999  # Роль не найдена в иерархии
+
+
 async def get_admin_members_by_category(guild: discord.Guild) -> dict:
     """
     Получить администраторов по категориям с группировкой по ролям
     Работает строго по конфигу CATEGORY_ROLE_MAPPINGS
+    Пользователь отображается только в категории с самой высшей ролью по GROUP_HIERARCHY
     
     Args:
         guild: Discord сервер
@@ -25,8 +62,12 @@ async def get_admin_members_by_category(guild: discord.Guild) -> dict:
     """
     admin_categories = {}
     
-    # Отслеживаем, какие роли уже были добавлены в другие категории
-    seen_roles = set()
+    # Сначала собираем всех пользователей и их роли
+    # user_id -> {role_name: category_name, role_priority: int}
+    user_best_roles = {}  # user_id -> (role_name, category_name, priority)
+    
+    # Создаем обратный маппинг: role_id -> (role_name, category_name)
+    role_to_category = {}
     
     for category_name in ADMIN_ROLE_CATEGORIES:
         admin_categories[category_name] = {}
@@ -35,28 +76,61 @@ async def get_admin_members_by_category(guild: discord.Guild) -> dict:
         role_names = CATEGORY_ROLE_MAPPINGS.get(category_name, [])
         
         if not role_names:
-            # Если в конфиге нет ролей для категории, пропускаем
             continue
         
         # Ищем роли по точному названию из конфига
         for role_name in role_names:
-            # Пропускаем, если роль уже была добавлена в другую категорию
-            if role_name in seen_roles:
-                continue
-            
-            # Ищем роль по точному названию
             role = discord.utils.get(guild.roles, name=role_name)
-            
             if role:
-                # Получаем участников с этой ролью
-                role_members = [member for member in guild.members if role in member.roles]
-                # Сохраняем роль даже если нет участников (чтобы показать "(нет пользователей)")
-                admin_categories[category_name][role_name] = role_members
-                seen_roles.add(role_name)
-            else:
-                # Роль не найдена на сервере, но всё равно добавляем в список (покажем "(нет пользователей)")
-                admin_categories[category_name][role_name] = []
-                seen_roles.add(role_name)
+                role_to_category[role.id] = (role_name, category_name)
+    
+    # Проходим по всем участникам и определяем их самую высшую роль
+    for member in guild.members:
+        member_best_role = None
+        member_best_priority = 999999
+        member_best_category = None
+        member_best_role_name = None
+        
+        # Проверяем все роли участника
+        for role in member.roles:
+            if role.id in role_to_category:
+                role_name, category_name = role_to_category[role.id]
+                priority = get_role_priority(role.id)
+                
+                # Если эта роль выше по приоритету, сохраняем её
+                if priority < member_best_priority:
+                    member_best_priority = priority
+                    member_best_role = role
+                    member_best_category = category_name
+                    member_best_role_name = role_name
+        
+        # Если нашли роль для участника, сохраняем
+        if member_best_category and member_best_role_name:
+            user_best_roles[member.id] = (member_best_role_name, member_best_category)
+    
+    # Теперь распределяем пользователей по категориям
+    for category_name in ADMIN_ROLE_CATEGORIES:
+        admin_categories[category_name] = {}
+        
+        # Получаем список ролей для этой категории из конфига
+        role_names = CATEGORY_ROLE_MAPPINGS.get(category_name, [])
+        
+        if not role_names:
+            continue
+        
+        # Для каждой роли в категории собираем участников
+        for role_name in role_names:
+            role_members = []
+            
+            # Добавляем участников, у которых эта роль - самая высшая
+            for user_id, (best_role_name, best_category) in user_best_roles.items():
+                if best_role_name == role_name and best_category == category_name:
+                    member = guild.get_member(user_id)
+                    if member:
+                        role_members.append(member)
+            
+            # Сохраняем роль даже если нет участников (чтобы показать "(нет пользователей)")
+            admin_categories[category_name][role_name] = role_members
     
     return admin_categories
 
