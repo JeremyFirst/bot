@@ -88,6 +88,7 @@ async def on_ready():
         # Проверка и автоматическое применение схемы БД
         try:
             if db.pool:
+                logger.info("Проверка схемы базы данных...")
                 async with db.pool.acquire() as conn:
                     async with conn.cursor() as cursor:
                         # Список обязательных таблиц из schema.sql
