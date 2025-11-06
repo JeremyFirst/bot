@@ -176,7 +176,7 @@ def create_admin_list_embed(
         guild: Discord сервер
     """
     embed = discord.Embed(
-        title="Состав Администрации",
+        title="📋 Состав Администрации",
         color=discord.Color.blue(),
         timestamp=datetime.utcnow()
     )
@@ -187,27 +187,52 @@ def create_admin_list_embed(
         value_parts = []
         
         if not roles_dict:
-            # Нет ролей в категории - показываем "(нет пользователей)"
-            value_parts.append("(нет пользователей)")
+            # Нет ролей в категории - ищем роли по названию категории
+            category_roles = [role for role in guild.roles if category_name.lower() in role.name.lower() or role.name.lower() in category_name.lower()]
+            category_roles = [r for r in category_roles if r.name != "@everyone"]
+            
+            if category_roles:
+                # Сортируем роли по позиции (от высшей к низшей)
+                category_roles.sort(key=lambda r: r.position, reverse=True)
+                
+                for role in category_roles:
+                    role_members = [m for m in guild.members if role in m.roles]
+                    if role_members:
+                        mentions = " ".join([m.mention for m in role_members])
+                        value_parts.append(f"{role.mention} {mentions}")
+                    else:
+                        value_parts.append(f"{role.mention} (нет пользователей)")
+            else:
+                value_parts.append("(нет пользователей)")
         else:
             # Есть роли в категории - сортируем по позиции роли
+            def get_role_position(role_name):
+                role_obj = discord.utils.get(guild.roles, name=role_name)
+                return role_obj.position if role_obj else 0
+            
             sorted_roles = sorted(
                 roles_dict.items(),
-                key=lambda x: discord.utils.get(guild.roles, name=x[0]).position if discord.utils.get(guild.roles, name=x[0]) else 0,
+                key=lambda x: get_role_position(x[0]),
                 reverse=True
             )
             
             for role_name, role_members in sorted_roles:
                 role_obj = discord.utils.get(guild.roles, name=role_name)
                 if role_obj:
-                    mentions = " ".join([m.mention for m in role_members])
-                    value_parts.append(f"{role_obj.mention}\n{mentions}")
+                    if role_members:
+                        mentions = " ".join([m.mention for m in role_members])
+                        value_parts.append(f"{role_obj.mention} {mentions}")
+                    else:
+                        value_parts.append(f"{role_obj.mention} (нет пользователей)")
                 else:
                     # Если роль не найдена, просто упоминания
-                    mentions = " ".join([m.mention for m in role_members])
-                    value_parts.append(f"@{role_name}\n{mentions}")
+                    if role_members:
+                        mentions = " ".join([m.mention for m in role_members])
+                        value_parts.append(f"@{role_name} {mentions}")
+                    else:
+                        value_parts.append(f"@{role_name} (нет пользователей)")
         
-        value = "\n\n".join(value_parts) if value_parts else "(нет пользователей)"
+        value = "\n".join(value_parts) if value_parts else "(нет пользователей)"
         embed.add_field(name=category_name, value=value, inline=False)
     
     embed.set_footer(text=datetime.utcnow().strftime("%d.%m.%Y %H:%M"))

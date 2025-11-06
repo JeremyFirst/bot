@@ -301,6 +301,14 @@ async def on_ready():
         await setup_warn(bot, db, rcon_manager)
         logger.info("✓ Команды загружены")
         
+        # Синхронизация команд с Discord
+        try:
+            logger.info("Синхронизация команд с Discord...")
+            synced = await bot.tree.sync()
+            logger.info(f"✓ Синхронизировано {len(synced)} команд с Discord")
+        except Exception as e:
+            logger.error(f"Ошибка синхронизации команд: {e}", exc_info=True)
+        
         # Запуск планировщика
         logger.info("Запуск планировщика задач...")
         scheduler = PrivilegeScheduler(bot, db, rcon_manager)

@@ -85,10 +85,21 @@ async def get_admin_members_by_category(guild: discord.Guild) -> dict:
                         category_roles.append(role)
         
         # Группируем участников по ролям
+        # Убираем дубликаты ролей (если роль уже была добавлена в другую категорию)
+        seen_roles = set()
         for role in category_roles:
-            role_members = [member for member in guild.members if role in member.roles]
-            # Сохраняем роль даже если нет участников (чтобы показать "(нет пользователей)")
-            admin_categories[category_name][role.name] = role_members
+            # Проверяем, не была ли эта роль уже добавлена в другую категорию
+            role_already_added = False
+            for other_category_name, other_roles_dict in admin_categories.items():
+                if other_category_name != category_name and role.name in other_roles_dict:
+                    role_already_added = True
+                    break
+            
+            if not role_already_added and role.name not in seen_roles:
+                role_members = [member for member in guild.members if role in member.roles]
+                # Сохраняем роль даже если нет участников (чтобы показать "(нет пользователей)")
+                admin_categories[category_name][role.name] = role_members
+                seen_roles.add(role.name)
     
     return admin_categories
 
