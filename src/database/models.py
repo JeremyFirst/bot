@@ -269,3 +269,41 @@ class Database:
                     (group_name, discord_role_id, discord_role_id)
                 )
                 await conn.commit()
+    
+    async def get_admin_list_message(self, guild_id: int) -> Optional[dict]:
+        """Получить информацию о сообщении состава администрации для сервера"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT channel_id, message_id FROM admin_list_messages WHERE guild_id = %s",
+                    (guild_id,)
+                )
+                result = await cursor.fetchone()
+                return result
+    
+    async def set_admin_list_message(self, guild_id: int, channel_id: int, message_id: int):
+        """Сохранить/обновить информацию о сообщении состава администрации"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "INSERT INTO admin_list_messages (guild_id, channel_id, message_id) "
+                    "VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE channel_id = %s, message_id = %s",
+                    (guild_id, channel_id, message_id, channel_id, message_id)
+                )
+                await conn.commit()
+    
+    async def delete_admin_list_message(self, guild_id: int):
+        """Удалить информацию о сообщении состава администрации"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "DELETE FROM admin_list_messages WHERE guild_id = %s",
+                    (guild_id,)
+                )
+                await conn.commit()

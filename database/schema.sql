@@ -37,6 +37,19 @@ CREATE TABLE IF NOT EXISTS role_mappings (
   discord_role_id BIGINT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- admin_list_messages: хранение message_id для автоматического обновления состава администрации
+CREATE TABLE IF NOT EXISTS admin_list_messages (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  guild_id BIGINT NOT NULL UNIQUE,
+  channel_id BIGINT NOT NULL,
+  message_id BIGINT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX IF NOT EXISTS idx_admin_list_guild_id ON admin_list_messages(guild_id);
+CREATE INDEX IF NOT EXISTS idx_admin_list_message_id ON admin_list_messages(message_id);
+
 -- Индексы для оптимизации запросов
 CREATE INDEX IF NOT EXISTS idx_privileges_discord_id ON privileges(discord_id);
 CREATE INDEX IF NOT EXISTS idx_privileges_steamid ON privileges(steamid);

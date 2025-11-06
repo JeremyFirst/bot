@@ -92,6 +92,7 @@ CHANNELS = {
     'ADMIN_LOGS': channels_env.get('ADMIN_LOGS', 0) if isinstance(channels_env.get('ADMIN_LOGS'), int) else int(channels_env.get('ADMIN_LOGS', 0)),
     'WARNINGS_CHANNEL': channels_env.get('WARNINGS_CHANNEL', 0) if isinstance(channels_env.get('WARNINGS_CHANNEL'), int) else int(channels_env.get('WARNINGS_CHANNEL', 0)),
     'CONSOLE_LOGS': channels_env.get('CONSOLE_LOGS', 0) if isinstance(channels_env.get('CONSOLE_LOGS'), int) else int(channels_env.get('CONSOLE_LOGS', 0)),
+    'ADMIN_LIST_CHANNEL': channels_env.get('ADMIN_LIST_CHANNEL', 0) if isinstance(channels_env.get('ADMIN_LIST_CHANNEL'), int) else int(channels_env.get('ADMIN_LIST_CHANNEL', 0)),
 }
 
 # Настройки логирования консоли

@@ -169,34 +169,48 @@ def create_admin_list_embed(
     guild: discord.Guild
 ) -> discord.Embed:
     """
-    Embed для списка администрации
+    Embed для списка администрации (широкий формат)
     
     Args:
-        admin_categories: Словарь {category_name: [discord.Member]}
+        admin_categories: Словарь {category_name: {role_name: [discord.Member]}}
         guild: Discord сервер
     """
     embed = discord.Embed(
-        title="👥 Состав администрации",
+        title="Состав Администрации",
         color=discord.Color.blue(),
         timestamp=datetime.utcnow()
     )
     
-    for category_name, members in admin_categories.items():
-        if not members:
-            value = "*Нет участников*"
-        else:
-            value = "\n".join([
-                f"{member.mention} (`{member.id}`)\n"
-                f"→ [Профиль](https://discord.com/users/{member.id})"
-                for member in members[:20]  # Ограничение на 20 участников
-            ])
-            if len(members) > 20:
-                value += f"\n\n...и еще {len(members) - 20} участников"
+    # Проходим по категориям
+    for category_name, roles_dict in admin_categories.items():
+        # Формируем значение для поля
+        value_parts = []
         
+        if not roles_dict:
+            # Нет ролей в категории - показываем "(нет пользователей)"
+            value_parts.append("(нет пользователей)")
+        else:
+            # Есть роли в категории - сортируем по позиции роли
+            sorted_roles = sorted(
+                roles_dict.items(),
+                key=lambda x: discord.utils.get(guild.roles, name=x[0]).position if discord.utils.get(guild.roles, name=x[0]) else 0,
+                reverse=True
+            )
+            
+            for role_name, role_members in sorted_roles:
+                role_obj = discord.utils.get(guild.roles, name=role_name)
+                if role_obj:
+                    mentions = " ".join([m.mention for m in role_members])
+                    value_parts.append(f"{role_obj.mention}\n{mentions}")
+                else:
+                    # Если роль не найдена, просто упоминания
+                    mentions = " ".join([m.mention for m in role_members])
+                    value_parts.append(f"@{role_name}\n{mentions}")
+        
+        value = "\n\n".join(value_parts) if value_parts else "(нет пользователей)"
         embed.add_field(name=category_name, value=value, inline=False)
     
-    if guild.icon:
-        embed.set_thumbnail(url=guild.icon.url)
+    embed.set_footer(text=datetime.utcnow().strftime("%d.%m.%Y %H:%M"))
     
     return embed
 

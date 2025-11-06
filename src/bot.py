@@ -30,6 +30,7 @@ from src.database.models import Database
 from src.rcon.rcon_manager import RCONManager
 from src.commands import setup_admin, setup_privilege, setup_warn
 from src.tasks.scheduler import PrivilegeScheduler
+from src.utils.admin_list_manager import AdminListManager
 
 # Настройка логирования
 log_file_path = LOG_FILE or 'logs/bot.log'
@@ -64,6 +65,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 db: Optional[Database] = None
 rcon_manager: Optional[RCONManager] = None
 scheduler: Optional[PrivilegeScheduler] = None
+admin_list_manager: Optional[AdminListManager] = None
 
 
 @bot.event
@@ -256,7 +258,7 @@ async def on_ready():
         
         # Загрузка команд
         logger.info("Загрузка команд...")
-        await setup_admin(bot)
+        await setup_admin(bot, db)
         await setup_privilege(bot, rcon_manager, db)
         await setup_warn(bot, db, rcon_manager)
         logger.info("✓ Команды загружены")
@@ -266,6 +268,12 @@ async def on_ready():
         scheduler = PrivilegeScheduler(bot, db, rcon_manager)
         await scheduler.start()
         logger.info("✓ Планировщик запущен")
+        
+        # Инициализация менеджера состава администрации
+        global admin_list_manager
+        if db:
+            admin_list_manager = AdminListManager(bot, db)
+            logger.info("✓ Менеджер состава администрации инициализирован")
         
         # Логирование в канал (если настроен)
         if CHANNELS.get('ADMIN_LOGS'):
@@ -285,6 +293,50 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Критическая ошибка при инициализации: {e}", exc_info=True)
         raise
+
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    """Обработка изменения участника (в т.ч. ролей)"""
+    global admin_list_manager
+    
+    # Проверяем, изменились ли роли
+    if before.roles != after.roles:
+        # Обновляем сообщение состава администрации
+        if admin_list_manager and after.guild:
+            try:
+                await admin_list_manager.update(after.guild)
+                logger.debug(f"Состав администрации обновлен после изменения ролей у {after.id}")
+            except Exception as e:
+                logger.error(f"Ошибка обновления состава администрации: {e}", exc_info=True)
+
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    """Обработка присоединения участника"""
+    global admin_list_manager
+    
+    # Обновляем сообщение состава администрации
+    if admin_list_manager and member.guild:
+        try:
+            await admin_list_manager.update(member.guild)
+            logger.debug(f"Состав администрации обновлен после присоединения {member.id}")
+        except Exception as e:
+            logger.error(f"Ошибка обновления состава администрации: {e}", exc_info=True)
+
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    """Обработка выхода участника"""
+    global admin_list_manager
+    
+    # Обновляем сообщение состава администрации
+    if admin_list_manager and member.guild:
+        try:
+            await admin_list_manager.update(member.guild)
+            logger.debug(f"Состав администрации обновлен после выхода {member.id}")
+        except Exception as e:
+            logger.error(f"Ошибка обновления состава администрации: {e}", exc_info=True)
 
 
 @bot.event
