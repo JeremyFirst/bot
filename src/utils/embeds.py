@@ -2,7 +2,7 @@
 Шаблоны Embed-сообщений для Discord
 """
 import discord
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from src.utils.time_utils import format_datetime_msk
@@ -20,7 +20,7 @@ def create_privilege_added_embed(
     embed = discord.Embed(
         title="Привилегия выдана",
         color=discord.Color.green(),
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
     
     embed.add_field(
@@ -62,7 +62,7 @@ def create_no_privileges_embed(
     embed = discord.Embed(
         title="У пользователя нет привилегий",
         color=discord.Color.red(),
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
     
     embed.add_field(name="SteamID", value=f"`{steamid}`", inline=False)
@@ -90,7 +90,7 @@ def create_warning_embed(
     embed = discord.Embed(
         title="⚠️ Выговор",
         color=discord.Color.orange(),
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
     
     embed.add_field(
@@ -141,7 +141,7 @@ def create_privilege_removed_embed(
     embed = discord.Embed(
         title="Привилегии сняты",
         color=discord.Color.red(),
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
     
     embed.add_field(
@@ -178,7 +178,7 @@ def create_admin_list_embed(
     embed = discord.Embed(
         title="📋 Состав Администрации",
         color=discord.Color.blue(),
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
     
     # Проходим по категориям
@@ -249,7 +249,7 @@ def create_error_embed(
         title=f"{title}",
         description=description,
         color=discord.Color.red(),
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
     return embed
 
@@ -263,7 +263,7 @@ def create_success_embed(
         title=f"{title}",
         description=description,
         color=discord.Color.green(),
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
     return embed
 

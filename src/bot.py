@@ -66,12 +66,13 @@ db: Optional[Database] = None
 rcon_manager: Optional[RCONManager] = None
 scheduler: Optional[PrivilegeScheduler] = None
 admin_list_manager: Optional[AdminListManager] = None
+startup_message_sent = False  # Флаг для отслеживания отправки сообщения о запуске
 
 
 @bot.event
 async def on_ready():
     """Событие при запуске бота"""
-    global db, rcon_manager, scheduler
+    global db, rcon_manager, scheduler, startup_message_sent
     
     if bot.user:
         logger.info(f'{bot.user} успешно запущен!')
@@ -323,15 +324,17 @@ async def on_ready():
             admin_list_manager = AdminListManager(bot, db)
             logger.info("✓ Менеджер состава администрации инициализирован")
         
-        # Логирование в канал (если настроен)
-        if CHANNELS.get('ADMIN_LOGS'):
+        # Логирование в канал (если настроен) - только один раз
+        if CHANNELS.get('ADMIN_LOGS') and not startup_message_sent:
             try:
                 channel_id = CHANNELS['ADMIN_LOGS']
+                # Ищем канал только в первом доступном сервере
                 for guild in bot.guilds:
                     channel = guild.get_channel(channel_id)
                     # Проверяем, что канал - это текстовый канал (TextChannel)
                     if isinstance(channel, discord.TextChannel):
                         await channel.send("Бот запущен и готов к работе")
+                        startup_message_sent = True
                         break
             except Exception as e:
                 logger.warning(f"Не удалось отправить сообщение в канал логов: {e}")
