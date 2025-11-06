@@ -77,6 +77,13 @@ elif admin_categories_env:
 else:
     ADMIN_ROLE_CATEGORIES = ['Старшая Администрация', 'Младшая Администрация']
 
+# Маппинг категорий к ролям (category_name -> [role_names])
+category_role_mappings_yaml = CONFIG_DATA.get('CATEGORY_ROLE_MAPPINGS', {})
+if category_role_mappings_yaml:
+    CATEGORY_ROLE_MAPPINGS = category_role_mappings_yaml
+else:
+    CATEGORY_ROLE_MAPPINGS = {}  # Пустой словарь - роли не будут найдены
+
 # Каналы Discord
 channels_yaml = CONFIG_DATA.get('CHANNELS', {})
 channels_env = {}
