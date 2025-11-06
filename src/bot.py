@@ -90,11 +90,28 @@ async def on_ready():
             if db.pool:
                 async with db.pool.acquire() as conn:
                     async with conn.cursor() as cursor:
-                        await cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s", (db.config['db'],))
-                        result = await cursor.fetchone()
-                        table_count = result[0] if result else 0
-                        if table_count == 0:
-                            logger.warning("⚠️ Таблицы в базе данных не найдены!")
+                        # Список обязательных таблиц из schema.sql
+                        required_tables = [
+                            'users',
+                            'privileges',
+                            'warnings',
+                            'role_mappings',
+                            'admin_list_messages'
+                        ]
+                        
+                        # Проверяем наличие каждой таблицы
+                        missing_tables = []
+                        for table_name in required_tables:
+                            await cursor.execute(
+                                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
+                                (db.config['db'], table_name)
+                            )
+                            result = await cursor.fetchone()
+                            if not result or result[0] == 0:
+                                missing_tables.append(table_name)
+                        
+                        if missing_tables:
+                            logger.warning(f"⚠️ Найдены отсутствующие таблицы: {', '.join(missing_tables)}")
                             logger.info("Применение схемы базы данных автоматически...")
                             
                             # Читаем схему из файла
@@ -182,11 +199,31 @@ async def on_ready():
                                                 logger.warning(f"   Команда: {command[:100]}")
                                 
                                 await conn.commit()
-                                logger.info("✅ Схема базы данных успешно применена!")
+                                
+                                # Проверяем результат - все ли таблицы созданы
+                                still_missing = []
+                                for table_name in required_tables:
+                                    await cursor.execute(
+                                        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
+                                        (db.config['db'], table_name)
+                                    )
+                                    result = await cursor.fetchone()
+                                    if not result or result[0] == 0:
+                                        still_missing.append(table_name)
+                                
+                                if still_missing:
+                                    logger.error(f"❌ Не удалось создать таблицы: {', '.join(still_missing)}")
+                                    logger.warning("Примените схему вручную через MySQL:")
+                                    logger.warning(f"  mysql -u {db.config['user']} -p {db.config['db']} < database/schema.sql")
+                                else:
+                                    logger.info("✅ Схема базы данных успешно применена!")
+                                    logger.info("✓ Все таблицы успешно созданы")
                             else:
                                 logger.error(f"❌ Файл схемы не найден: {schema_file}")
                                 logger.warning("Примените схему вручную через MySQL:")
                                 logger.warning(f"  mysql -u {db.config['user']} -p {db.config['db']} < database/schema.sql")
+                        else:
+                            logger.info("✓ Все таблицы базы данных существуют")
         except Exception as e:
             logger.warning(f"Не удалось проверить/применить схему БД: {e}")
         
