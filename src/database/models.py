@@ -462,6 +462,19 @@ class Database:
                 rows = await cursor.fetchall()
                 return list(rows) if rows else []
 
+    async def get_open_ticket_by_owner(self, guild_id: int, owner_id: int) -> Optional[dict]:
+        """Получить открытый тикет конкретного пользователя"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT * FROM tickets WHERE guild_id = %s AND owner_id = %s AND status = 'open' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (guild_id, owner_id)
+                )
+                return await cursor.fetchone()
+
     async def get_ticket_load_by_assignee(self, guild_id: int) -> Dict[int, int]:
         """Получить количество открытых тикетов на администратора"""
         if not self.pool:

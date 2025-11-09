@@ -3,7 +3,7 @@
 """
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import discord
 
@@ -14,7 +14,8 @@ async def send_ephemeral_with_delete(
     interaction: discord.Interaction,
     content: Optional[str] = None,
     embed: Optional[discord.Embed] = None,
-    delete_after: float = 10.0
+    delete_after: float = 10.0,
+    view: Optional[discord.ui.View] = None
 ) -> Optional[discord.WebhookMessage]:
     """
     Отправляет ephemeral сообщение и автоматически удаляет его через указанное время
@@ -31,26 +32,30 @@ async def send_ephemeral_with_delete(
     try:
         # Отправляем ephemeral сообщение
         # Передаем только не-None параметры
+        send_kwargs: Dict[str, Any] = {"ephemeral": True}
+        if view is not None:
+            send_kwargs["view"] = view
+
         if content is not None and embed is not None:
             message = await interaction.followup.send(
                 content=content,
                 embed=embed,
-                ephemeral=True
+                **send_kwargs
             )
         elif content is not None:
             message = await interaction.followup.send(
                 content=content,
-                ephemeral=True
+                **send_kwargs
             )
         elif embed is not None:
             message = await interaction.followup.send(
                 embed=embed,
-                ephemeral=True
+                **send_kwargs
             )
         else:
             message = await interaction.followup.send(
                 content="*Сообщение*",
-                ephemeral=True
+                **send_kwargs
             )
         
         if not message:

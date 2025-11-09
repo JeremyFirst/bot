@@ -14,9 +14,17 @@ from discord.ext import commands
 
 from config.config import TICKET_SYSTEM, EPHEMERAL_DELETE_AFTER
 from src.database.models import Database
-from src.utils.message_utils import send_ephemeral_with_delete
+from src.utils.message_utils import send_ephemeral_with_delete, send_response_with_delete
 
 logger = logging.getLogger(__name__)
+
+TICKET_PREFIX = "[Ticket Manager]"
+ADMIN_CLOSE_OPTIONS: List[Tuple[str, str]] = [
+    ("Одобрено — выдано наказание", "Рассмотрено. Одобрено.\n\nИгрок получит наказание"),
+    ("Рассмотрено — отказано", "Рассмотрено. Отказано"),
+    ("Передано на доп. рассмотрение", "Передано на дополнительное рассмотрение"),
+    ("Закрыто без действий", "Закрыто без дополнительных действий")
+]
 
 
 TICKET_REASONS: Dict[str, Dict[str, object]] = {
@@ -60,6 +68,7 @@ class TicketManager:
         self._lock = asyncio.Lock()
         self.transcript_dir = Path(TICKET_SYSTEM.get('TRANSCRIPT_DIRECTORY', 'transcripts'))
         self.transcript_dir.mkdir(parents=True, exist_ok=True)
+        self._panel_cache: Dict[int, int] = {}
 
     # --- Общие проверки и утилиты ---
 
@@ -157,6 +166,7 @@ class TicketManager:
         message = await channel.send(embed=embed, view=view)
         await self.db.upsert_ticket_panel(guild.id, channel.id, message.id)
         await self.register_panel_view(guild.id, message.id)
+        self._panel_cache[guild.id] = message.id
         return message
 
     async def restore_panel(self, guild: discord.Guild) -> Optional[discord.Message]:
@@ -172,10 +182,29 @@ class TicketManager:
         try:
             message = await channel.fetch_message(panel['message_id'])
             await self.register_panel_view(guild.id, message.id)
+            self._panel_cache[guild.id] = message.id
             return message
         except discord.NotFound:
             logger.warning("Сообщение панели тикетов не найдено, создаю заново.")
             return await self.publish_panel(guild)
+
+    async def refresh_panel_view(self, guild: discord.Guild):
+        """Сбросить состояние селектора панели."""
+        panel = await self.db.get_ticket_panel(guild.id)
+        if not panel:
+            return
+        channel = guild.get_channel(panel['channel_id'])
+        if not isinstance(channel, discord.TextChannel):
+            return
+        try:
+            message = await channel.fetch_message(panel['message_id'])
+            view = TicketPanelView(self)
+            await message.edit(view=view)
+            self._panel_cache[guild.id] = message.id
+        except discord.NotFound:
+            logger.debug("Сообщение панели не найдено при обновлении.")
+        except discord.HTTPException as exc:
+            logger.error(f"Ошибка обновления панели тикетов: {exc}", exc_info=True)
 
     # --- Тикеты ---
 
@@ -272,46 +301,64 @@ class TicketManager:
             color=discord.Color.dark_teal(),
             timestamp=datetime.now(timezone.utc)
         )
+
+        steam_value = form_data.get("steam_id") or "—"
+        violator_value = form_data.get("violator") or "—"
+        evidence_value = form_data.get("evidence") or "—"
+        date_value = form_data.get("date") or "—"
+        reason_value = reason_info.get("label", reason_key)
+        assignee_value = (
+            f"{assignee.mention}\nID: `{assignee.id}`" if assignee
+            else "Будет назначен автоматически"
+        )
+
         embed.add_field(
             name="Заявитель",
-            value=f"{interaction.user.mention}\nID: `{interaction.user.id}`",
-            inline=False
+            value=f"{interaction.user.mention}\nID: `{interaction.user.id}`\nSteamID: `{steam_value}`",
+            inline=True
         )
         embed.add_field(
-            name="Причина",
-            value=reason_info.get("label", reason_key),
+            name="Информация о нарушителе",
+            value=violator_value,
+            inline=True
+        )
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+        embed.add_field(
+            name="Причина обращения",
+            value=reason_value,
+            inline=True
+        )
+        embed.add_field(
+            name="Доказательства",
+            value=evidence_value,
+            inline=True
+        )
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+        embed.add_field(
+            name="Дата происходящего",
+            value=date_value,
+            inline=True
+        )
+        embed.add_field(
+            name="Назначенный администратор",
+            value=assignee_value,
+            inline=True
+        )
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+        details_value = form_data.get("details") or "—"
+        embed.add_field(
+            name="Подробное описание",
+            value=details_value,
             inline=False
         )
 
-        if assignee:
-            embed.add_field(
-                name="Назначенный администратор",
-                value=f"{assignee.mention}\nID: `{assignee.id}`",
-                inline=False
-            )
-        else:
-            embed.add_field(
-                name="Назначенный администратор",
-                value="Будет назначен автоматически, ожидайте.",
-                inline=False
-            )
-
-        field_mapping = {
-            "steam_id": "SteamID",
-            "violator": "SteamID/Ник нарушителя",
-            "evidence": "Доказательства",
-            "date": "Дата происходящего",
-            "details": "Описание"
-        }
-        for key, value in form_data.items():
-            if not value:
-                continue
-            label = field_mapping.get(key, key)
-            embed.add_field(name=label, value=value, inline=False)
-
         view = TicketView(self, ticket_id=ticket_id)
+        await asyncio.sleep(0.5)
         message = await channel.send(
-            content=f"{interaction.user.mention}",
+            content=f"{TICKET_PREFIX} Новый тикет создан.",
             embed=embed,
             view=view
         )
@@ -319,10 +366,12 @@ class TicketManager:
         await self.db.set_ticket_control_message(ticket_id, message.id)
         self.bot.add_view(view, message_id=message.id)
 
+        await asyncio.sleep(0.5)
         if assignee:
-            await channel.send(f"{assignee.mention}, назначен новый тикет.")
+            await channel.send(f"{TICKET_PREFIX} Назначен ответственный: {assignee.mention}.")
 
         await self._log_ticket_creation(channel.guild, channel, interaction.user, assignee, ticket_number, reason_key)
+        await self.refresh_panel_view(guild)
         return channel, ticket_number, assignee
 
     async def _log_ticket_creation(
@@ -434,11 +483,44 @@ class TicketManager:
 
         await self.db.close_ticket(ticket_id, transcript_url)
         try:
-            await channel.send("Тикет будет закрыт через несколько секунд.")
+            await channel.send(f"{TICKET_PREFIX} Тикет будет закрыт через несколько секунд.")
             await asyncio.sleep(5)
         except Exception:
             pass
         await channel.delete(reason=f"Тикет #{ticket['ticket_number']} закрыт администратором {closer}")
+        await self.refresh_panel_view(closer.guild)
+
+    async def close_ticket_by_owner(self, ticket_id: int, closer: discord.Member):
+        """Закрыть тикет владельцем без транскрипта."""
+        ticket = await self.db.get_ticket_by_id(ticket_id)
+        if not ticket:
+            raise ValueError("Тикет не найден.")
+
+        channel = closer.guild.get_channel(ticket['channel_id'])
+
+        await self.db.close_ticket(ticket_id, None)
+
+        log_channel_id = TICKET_SYSTEM.get('LOG_CHANNEL')
+        log_channel = closer.guild.get_channel(log_channel_id) if log_channel_id else None
+        if isinstance(log_channel, discord.TextChannel):
+            embed = discord.Embed(
+                title=f"Тикет #{ticket['ticket_number']:0{TICKET_SYSTEM.get('TICKET_NUMBER_PADDING', 4)}d} закрыт владельцем",
+                color=discord.Color.dark_gray(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.add_field(name="Канал", value=f"<#{ticket['channel_id']}>", inline=False)
+            embed.add_field(name="Владелец", value=f"{closer.mention} (`{closer.id}`)", inline=False)
+            await log_channel.send(embed=embed)
+
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.send(f"{TICKET_PREFIX} Тикет закрывается по запросу владельца.")
+                await asyncio.sleep(3)
+                await channel.delete(reason=f"Владелец {closer} закрыл тикет самостоятельно")
+            except discord.HTTPException:
+                pass
+
+        await self.refresh_panel_view(closer.guild)
 
     async def _build_transcript(self, channel: discord.TextChannel) -> Tuple[Optional[Path], int]:
         messages: List[discord.Message] = []
@@ -554,10 +636,31 @@ class TicketReasonSelect(discord.ui.Select):
         self.manager = manager
 
     async def callback(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await send_response_with_delete(
+                interaction,
+                content="Эта панель доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        existing_ticket = await self.manager.db.get_open_ticket_by_owner(interaction.guild.id, interaction.user.id)
+        if existing_ticket:
+            await send_response_with_delete(
+                interaction,
+                content="У вас уже есть открытый тикет. Закройте его перед созданием нового.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
         reason_key = self.values[0]
         reason = TICKET_REASONS.get(reason_key)
         if not reason:
-            await interaction.response.send_message("Причина не найдена.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Причина не найдена.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         modal = TicketModal(self.manager, reason_key=reason_key, reason=reason)
@@ -626,7 +729,28 @@ class TicketModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         if not self.manager.is_enabled():
-            await interaction.response.send_message("Тикет-система отключена.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Тикет-система отключена.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        existing_ticket = await self.manager.db.get_open_ticket_by_owner(interaction.guild.id, interaction.user.id)
+        if existing_ticket:
+            await send_response_with_delete(
+                interaction,
+                content="У вас уже есть открытый тикет. Пожалуйста, закройте его перед созданием нового.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -677,50 +801,90 @@ class TicketView(discord.ui.View):
         self.manager = manager
         self.ticket_id = ticket_id
 
-    @discord.ui.button(label="Закрыть тикет", style=discord.ButtonStyle.danger, custom_id="ticket_close")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
-            return
-
-        if not self.manager.is_staff(interaction.user):
-            await interaction.response.send_message("Только администрация может закрыть тикет.", ephemeral=True)
-            return
-
-        modal = CloseTicketModal(self.manager, ticket_id=self.ticket_id)
-        await interaction.response.send_modal(modal)
-
-    @discord.ui.button(label="Дополнить тикет", style=discord.ButtonStyle.primary, custom_id="ticket_append")
-    async def append_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
-            return
-
-        modal = AppendInfoModal(self.manager, ticket_id=self.ticket_id)
-        await interaction.response.send_modal(modal)
-
     @discord.ui.button(label="Панель администратора", style=discord.ButtonStyle.success, custom_id="ticket_admin_panel")
     async def admin_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         if not self.manager.is_staff(interaction.user):
-            await interaction.response.send_message("Панель доступна только администрации.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Панель доступна только администрации.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         ticket = await self.manager.db.get_ticket_by_id(self.ticket_id)
         if not ticket:
-            await interaction.response.send_message("Тикет не найден.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Тикет не найден.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         current_assignee_id = ticket.get('assignee_id')
         view = AdminPanelView(self.manager, ticket_id=self.ticket_id, current_assignee_id=current_assignee_id)
+        await interaction.response.defer(ephemeral=True)
         description = (
-            f"Текущий назначенный администратор: "
-            f"<@{current_assignee_id}>" if current_assignee_id else "Назначенного администратора нет."
+            f"Текущий назначенный администратор: <@{current_assignee_id}>"
+            if current_assignee_id else "Назначенного администратора нет."
         )
-        await interaction.response.send_message(description, view=view, ephemeral=True)
+        await send_ephemeral_with_delete(
+            interaction,
+            content=description,
+            view=view,
+            delete_after=EPHEMERAL_DELETE_AFTER
+        )
+
+    @discord.ui.button(label="Закрыть тикет", style=discord.ButtonStyle.danger, custom_id="ticket_owner_close")
+    async def owner_close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        ticket = await self.manager.db.get_ticket_by_id(self.ticket_id)
+        if not ticket:
+            await send_response_with_delete(
+                interaction,
+                content="Тикет не найден.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        if interaction.user.id != ticket.get('owner_id') and not self.manager.is_staff(interaction.user):
+            await send_response_with_delete(
+                interaction,
+                content="Вы не владелец этого тикета.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        if self.manager.is_staff(interaction.user) and interaction.user.id != ticket.get('owner_id'):
+            await send_response_with_delete(
+                interaction,
+                content="Используйте панель администратора для закрытия тикета.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        view = OwnerConfirmCloseView(self.manager, ticket_id=self.ticket_id)
+        await send_ephemeral_with_delete(
+            interaction,
+            content="Вы уверены, что хотите закрыть тикет?",
+            view=view,
+            delete_after=EPHEMERAL_DELETE_AFTER
+        )
 
 
 class AppendInfoModal(discord.ui.Modal):
@@ -742,21 +906,35 @@ class AppendInfoModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         ticket = await self.manager.db.get_ticket_by_id(self.ticket_id)
         if not ticket:
-            await interaction.response.send_message("Тикет не найден.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Тикет не найден.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         channel = interaction.guild.get_channel(ticket['channel_id'])
         if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("Канал тикета недоступен.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Канал тикета недоступен.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
+        await interaction.response.defer(ephemeral=True)
         await self.manager.append_ticket_note(self.ticket_id, interaction.user, self.details.value.strip())
         await channel.send(
+            content=f"{TICKET_PREFIX} Дополнительная информация от {interaction.user.mention}.",
             embed=discord.Embed(
                 title="Дополнительная информация",
                 description=self.details.value.strip(),
@@ -764,7 +942,11 @@ class AppendInfoModal(discord.ui.Modal):
                 timestamp=datetime.now(timezone.utc)
             ).set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
         )
-        await interaction.response.send_message("Информация добавлена.", ephemeral=True)
+        await send_ephemeral_with_delete(
+            interaction,
+            content="Информация добавлена.",
+            delete_after=EPHEMERAL_DELETE_AFTER
+        )
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         logger.error(f"Ошибка при дополнении тикета: {error}", exc_info=True)
@@ -774,57 +956,11 @@ class AppendInfoModal(discord.ui.Modal):
             await interaction.response.send_message("Не удалось добавить информацию.", ephemeral=True)
 
 
-class CloseTicketModal(discord.ui.Modal):
-    """Модалка для закрытия тикета с комментариями."""
-
-    def __init__(self, manager: TicketManager, ticket_id: int):
-        super().__init__(title="Закрытие тикета", timeout=None)
-        self.manager = manager
-        self.ticket_id = ticket_id
-
-        self.comment = discord.ui.TextInput(
-            label="Комментарий (опционально)",
-            style=discord.TextStyle.long,
-            placeholder="Опишите результат рассмотрения тикета",
-            required=False,
-            max_length=1000
-        )
-        self.add_item(self.comment)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await self.manager.close_ticket(self.ticket_id, interaction.user, self.comment.value.strip())
-            await send_ephemeral_with_delete(
-                interaction,
-                content="Тикет закрыт и канал будет удалён.",
-                delete_after=EPHEMERAL_DELETE_AFTER
-            )
-        except Exception as exc:
-            logger.error(f"Ошибка при закрытии тикета: {exc}", exc_info=True)
-            await send_ephemeral_with_delete(
-                interaction,
-                content=f"Не удалось закрыть тикет: {exc}",
-                delete_after=EPHEMERAL_DELETE_AFTER
-            )
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        logger.error(f"Ошибка модалки закрытия тикета: {error}", exc_info=True)
-        if interaction.response.is_done():
-            await interaction.followup.send("Не удалось закрыть тикет.", ephemeral=True)
-        else:
-            await interaction.response.send_message("Не удалось закрыть тикет.", ephemeral=True)
-
-
 class AdminPanelView(discord.ui.View):
     """Эфемерная панель администратора."""
 
     def __init__(self, manager: TicketManager, ticket_id: int, current_assignee_id: Optional[int]):
-        super().__init__(timeout=60)
+        super().__init__(timeout=EPHEMERAL_DELETE_AFTER)
         self.manager = manager
         self.ticket_id = ticket_id
         self.current_assignee_id = current_assignee_id
@@ -832,56 +968,220 @@ class AdminPanelView(discord.ui.View):
     @discord.ui.button(label="Принять тикет", style=discord.ButtonStyle.primary, custom_id="ticket_claim")
     async def claim_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         if not self.manager.is_staff(interaction.user):
-            await interaction.response.send_message("Недостаточно прав для принятия тикета.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Недостаточно прав для принятия тикета.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         ticket = await self.manager.db.get_ticket_by_id(self.ticket_id)
         if not ticket:
-            await interaction.response.send_message("Тикет не найден.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Тикет не найден.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         if ticket.get('assignee_id') == interaction.user.id:
-            await interaction.response.send_message("Вы уже назначены на этот тикет.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Вы уже назначены на этот тикет.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
+        await interaction.response.defer(ephemeral=True)
         await self.manager.assign_ticket(self.ticket_id, interaction.user)
 
         channel = interaction.guild.get_channel(ticket['channel_id'])
         if isinstance(channel, discord.TextChannel):
-            await channel.send(f"{interaction.user.mention} назначен на этот тикет.")
+            await channel.send(f"{TICKET_PREFIX} {interaction.user.mention} назначен ответственным за тикет.")
 
-        await interaction.response.send_message("Вы назначены ответственным за тикет.", ephemeral=True)
+        await send_ephemeral_with_delete(
+            interaction,
+            content="Вы назначены ответственным за тикет.",
+            delete_after=EPHEMERAL_DELETE_AFTER
+        )
 
     @discord.ui.button(label="Снять назначение", style=discord.ButtonStyle.secondary, custom_id="ticket_release")
     async def release_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         if not self.manager.is_staff(interaction.user):
-            await interaction.response.send_message("Недостаточно прав для изменения назначения.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Недостаточно прав для изменения назначения.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         ticket = await self.manager.db.get_ticket_by_id(self.ticket_id)
         if not ticket:
-            await interaction.response.send_message("Тикет не найден.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="Тикет не найден.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
         if not ticket.get('assignee_id'):
-            await interaction.response.send_message("На тикет никто не назначен.", ephemeral=True)
+            await send_response_with_delete(
+                interaction,
+                content="На тикет никто не назначен.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             return
 
+        await interaction.response.defer(ephemeral=True)
         await self.manager.release_ticket(self.ticket_id)
 
         channel = interaction.guild.get_channel(ticket['channel_id'])
         if isinstance(channel, discord.TextChannel):
-            await channel.send("Назначенный администратор снят. Тикет ожидает нового назначения.")
+            await channel.send(f"{TICKET_PREFIX} Назначенный администратор снят. Тикет ожидает нового назначения.")
 
-        await interaction.response.send_message("Назначение снято.", ephemeral=True)
+        await send_ephemeral_with_delete(
+            interaction,
+            content="Назначение снято.",
+            delete_after=EPHEMERAL_DELETE_AFTER
+        )
+
+    @discord.ui.button(label="Дополнить тикет", style=discord.ButtonStyle.secondary, custom_id="ticket_append")
+    async def append_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        if not self.manager.is_staff(interaction.user):
+            await send_response_with_delete(
+                interaction,
+                content="Недостаточно прав для добавления информации.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        modal = AppendInfoModal(self.manager, ticket_id=self.ticket_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.select(
+        placeholder="Выберите причину закрытия",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label=label, value=str(index))
+            for index, (label, _comment) in enumerate(ADMIN_CLOSE_OPTIONS)
+        ],
+        custom_id="ticket_admin_close_select"
+    )
+    async def close_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        if not self.manager.is_staff(interaction.user):
+            await send_response_with_delete(
+                interaction,
+                content="Недостаточно прав для закрытия тикета.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        try:
+            choice_index = int(select.values[0])
+        except (ValueError, IndexError):
+            await send_response_with_delete(
+                interaction,
+                content="Некорректный выбор.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        if choice_index < 0 or choice_index >= len(ADMIN_CLOSE_OPTIONS):
+            await send_response_with_delete(
+                interaction,
+                content="Некорректный выбор.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        comment = ADMIN_CLOSE_OPTIONS[choice_index][1]
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.manager.close_ticket(self.ticket_id, interaction.user, comment)
+            await send_ephemeral_with_delete(
+                interaction,
+                content="Тикет закрыт.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+        except Exception as exc:
+            logger.error(f"Ошибка закрытия тикета администратором: {exc}", exc_info=True)
+            await send_ephemeral_with_delete(
+                interaction,
+                content=f"Не удалось закрыть тикет: {exc}",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+
+
+class OwnerConfirmCloseView(discord.ui.View):
+    """Эфемерное подтверждение закрытия тикета владельцем."""
+
+    def __init__(self, manager: TicketManager, ticket_id: int):
+        super().__init__(timeout=EPHEMERAL_DELETE_AFTER)
+        self.manager = manager
+        self.ticket_id = ticket_id
+
+    @discord.ui.button(label="Подтвердить закрытие", style=discord.ButtonStyle.danger, custom_id="ticket_owner_confirm_close")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await send_response_with_delete(
+                interaction,
+                content="Команда доступна только на сервере.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        ticket = await self.manager.db.get_ticket_by_id(self.ticket_id)
+        if not ticket or ticket.get('owner_id') != interaction.user.id:
+            await send_response_with_delete(
+                interaction,
+                content="Вы не владелец этого тикета.",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        await self.manager.close_ticket_by_owner(self.ticket_id, interaction.user)
+
+    @discord.ui.button(label="Отмена", style=discord.ButtonStyle.secondary, custom_id="ticket_owner_cancel")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await send_response_with_delete(
+            interaction,
+            content="Закрытие отменено.",
+            delete_after=EPHEMERAL_DELETE_AFTER
+        )
 
 
 class TicketSystem(commands.Cog):
