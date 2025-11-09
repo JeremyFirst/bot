@@ -8,12 +8,13 @@ import logging
 import asyncio
 from typing import Optional
 
-from config.config import CHANNELS, PUNISHMENT_LIMITS, PURCHASE_LINK, ROLE_MAPPINGS
+from config.config import CHANNELS, PUNISHMENT_LIMITS, PURCHASE_LINK, ROLE_MAPPINGS, EPHEMERAL_DELETE_AFTER
 from src.utils.embeds import create_warning_embed, create_error_embed
 from src.database.models import Database
 from src.rcon.rcon_manager import RCONManager
 from src.utils.parsers import parse_pinfo_response, parse_removegroup_response
 from src.utils.embeds import create_privilege_removed_embed
+from src.utils.message_utils import send_ephemeral_with_delete
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class WarnCommands(commands.Cog):
                 )
                 return
             
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
             
             # Определяем категорию пользователя
             category = get_user_category(user)
@@ -87,6 +88,7 @@ class WarnCommands(commands.Cog):
             
             # Отправляем в канал предупреждений
             channel_id = CHANNELS.get('WARNINGS_CHANNEL')
+            channel: Optional[discord.abc.GuildChannel] = None
             if channel_id and interaction.guild:
                 channel = interaction.guild.get_channel(channel_id)
                 if channel and isinstance(channel, discord.TextChannel):
@@ -106,7 +108,11 @@ class WarnCommands(commands.Cog):
             except discord.Forbidden:
                 logger.warning(f"Не удалось отправить ЛС пользователю {user.id}")
             
-            await interaction.followup.send(embed=embed)
+            await send_ephemeral_with_delete(
+                interaction,
+                content="Выговор пользователю выдан",
+                delete_after=EPHEMERAL_DELETE_AFTER
+            )
             
             # Проверяем лимит выговоров
             if warnings_count >= limit:

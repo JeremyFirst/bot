@@ -126,6 +126,7 @@ def create_warning_embed(
             inline=False
         )
         embed.color = discord.Color.red()
+        embed.title = "Снятие прав"
     
     embed.set_thumbnail(url=warned_user.display_avatar.url)
     

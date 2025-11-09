@@ -3,7 +3,7 @@
 Поддержка MariaDB/MySQL
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 import aiomysql
 import logging
 from urllib.parse import urlparse, unquote
@@ -305,5 +305,191 @@ class Database:
                 await cursor.execute(
                     "DELETE FROM admin_list_messages WHERE guild_id = %s",
                     (guild_id,)
+                )
+                await conn.commit()
+
+    # Ticket panels
+    async def get_ticket_panel(self, guild_id: int) -> Optional[dict]:
+        """Получить данные панели тикетов для сервера"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT channel_id, message_id FROM ticket_panels WHERE guild_id = %s",
+                    (guild_id,)
+                )
+                return await cursor.fetchone()
+
+    async def upsert_ticket_panel(self, guild_id: int, channel_id: int, message_id: int):
+        """Сохранить или обновить информацию о панели тикетов"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "INSERT INTO ticket_panels (guild_id, channel_id, message_id) "
+                    "VALUES (%s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE channel_id = VALUES(channel_id), message_id = VALUES(message_id)",
+                    (guild_id, channel_id, message_id)
+                )
+                await conn.commit()
+
+    async def delete_ticket_panel(self, guild_id: int):
+        """Удалить информацию о панели тикетов"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "DELETE FROM ticket_panels WHERE guild_id = %s",
+                    (guild_id,)
+                )
+                await conn.commit()
+
+    # Tickets
+    async def get_next_ticket_number(self, guild_id: int) -> int:
+        """Получить следующий порядковый номер тикета для сервера"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT COALESCE(MAX(ticket_number), 0) + 1 FROM tickets WHERE guild_id = %s",
+                    (guild_id,)
+                )
+                result = await cursor.fetchone()
+                return int(result[0]) if result and result[0] else 1
+
+    async def create_ticket(
+        self,
+        guild_id: int,
+        channel_id: int,
+        owner_id: int,
+        ticket_number: int,
+        reason: str,
+        form_data: str,
+        assignee_id: Optional[int] = None
+    ) -> int:
+        """Создать запись о тикете"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "INSERT INTO tickets (ticket_number, guild_id, channel_id, owner_id, assignee_id, reason, form_data) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (ticket_number, guild_id, channel_id, owner_id, assignee_id, reason, form_data)
+                )
+                await conn.commit()
+                return cursor.lastrowid  # type: ignore[attr-defined]
+
+    async def set_ticket_control_message(self, ticket_id: int, message_id: int):
+        """Сохранить ID управляющего сообщения в тикете"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "UPDATE tickets SET control_message_id = %s WHERE id = %s",
+                    (message_id, ticket_id)
+                )
+                await conn.commit()
+
+    async def set_ticket_assignee(self, ticket_id: int, assignee_id: Optional[int]):
+        """Обновить назначенного администратора для тикета"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "UPDATE tickets SET assignee_id = %s WHERE id = %s",
+                    (assignee_id, ticket_id)
+                )
+                await conn.commit()
+
+    async def update_ticket_form_data(self, ticket_id: int, form_data: str):
+        """Обновить дополнительные данные тикета"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "UPDATE tickets SET form_data = %s WHERE id = %s",
+                    (form_data, ticket_id)
+                )
+                await conn.commit()
+
+    async def get_ticket_by_channel(self, channel_id: int) -> Optional[dict]:
+        """Получить тикет по ID канала"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT * FROM tickets WHERE channel_id = %s",
+                    (channel_id,)
+                )
+                return await cursor.fetchone()
+
+    async def get_ticket_by_id(self, ticket_id: int) -> Optional[dict]:
+        """Получить тикет по ID"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT * FROM tickets WHERE id = %s",
+                    (ticket_id,)
+                )
+                return await cursor.fetchone()
+
+    async def get_open_tickets(self, guild_id: Optional[int] = None) -> List[dict]:
+        """Получить список открытых тикетов"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                if guild_id:
+                    await cursor.execute(
+                        "SELECT * FROM tickets WHERE status = 'open' AND guild_id = %s",
+                        (guild_id,)
+                    )
+                else:
+                    await cursor.execute(
+                        "SELECT * FROM tickets WHERE status = 'open'"
+                    )
+                rows = await cursor.fetchall()
+                return list(rows) if rows else []
+
+    async def get_ticket_load_by_assignee(self, guild_id: int) -> Dict[int, int]:
+        """Получить количество открытых тикетов на администратора"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT assignee_id, COUNT(*) FROM tickets "
+                    "WHERE guild_id = %s AND status = 'open' AND assignee_id IS NOT NULL "
+                    "GROUP BY assignee_id",
+                    (guild_id,)
+                )
+                rows = await cursor.fetchall()
+                load_map: Dict[int, int] = {}
+                if rows:
+                    for assignee_id, count in rows:
+                        if assignee_id:
+                            load_map[int(assignee_id)] = int(count)
+                return load_map
+
+    async def close_ticket(self, ticket_id: int, transcript_url: Optional[str] = None):
+        """Закрыть тикет и сохранить ссылку на транскрипт"""
+        if not self.pool:
+            raise RuntimeError("База данных не подключена. Вызовите connect() сначала.")
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "UPDATE tickets SET status = 'closed', closed_at = NOW(), transcript_url = %s WHERE id = %s",
+                    (transcript_url, ticket_id)
                 )
                 await conn.commit()

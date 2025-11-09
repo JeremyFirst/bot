@@ -180,3 +180,37 @@ BOT_ACTIVITY_TYPE = bot_activity_type_raw.lower() if isinstance(bot_activity_typ
 # Время автоудаления ephemeral сообщений (в секундах)
 ephemeral_delete_after = get_config('EPHEMERAL_DELETE_AFTER', os.getenv('EPHEMERAL_DELETE_AFTER', '10'))
 EPHEMERAL_DELETE_AFTER = float(ephemeral_delete_after) if ephemeral_delete_after is not None else 10.0
+
+# Настройки тикет-системы
+ticket_system_yaml = CONFIG_DATA.get('TICKET_SYSTEM', {}) or {}
+
+def _parse_bool(value, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {'true', '1', 'yes', 'on'}
+    if value is None:
+        return default
+    return bool(value)
+
+def _parse_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+admin_roles_yaml = ticket_system_yaml.get('ADMIN_ROLES', []) or []
+if isinstance(admin_roles_yaml, list):
+    ticket_admin_roles = [_parse_int(role_id, 0) for role_id in admin_roles_yaml if _parse_int(role_id, 0)]
+else:
+    ticket_admin_roles = []
+
+TICKET_SYSTEM = {
+    'ENABLED': _parse_bool(ticket_system_yaml.get('ENABLED', False)),
+    'PANEL_CHANNEL': _parse_int(ticket_system_yaml.get('PANEL_CHANNEL', 0), 0),
+    'LOG_CHANNEL': _parse_int(ticket_system_yaml.get('LOG_CHANNEL', 0), 0),
+    'CATEGORY_ID': _parse_int(ticket_system_yaml.get('CATEGORY_ID', 0), 0),
+    'ADMIN_ROLES': ticket_admin_roles,
+    'TRANSCRIPT_DIRECTORY': ticket_system_yaml.get('TRANSCRIPT_DIRECTORY', 'transcripts'),
+    'TICKET_NUMBER_PADDING': _parse_int(ticket_system_yaml.get('TICKET_NUMBER_PADDING', 4), 4)
+}

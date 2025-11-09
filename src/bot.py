@@ -28,7 +28,7 @@ from config.config import (
 )
 from src.database.models import Database
 from src.rcon.rcon_manager import RCONManager
-from src.commands import setup_admin, setup_privilege, setup_warn
+from src.commands import setup_admin, setup_privilege, setup_warn, setup_tickets
 from src.tasks.scheduler import PrivilegeScheduler
 from src.utils.admin_list_manager import AdminListManager
 
@@ -98,7 +98,9 @@ async def on_ready():
                             'privileges',
                             'warnings',
                             'role_mappings',
-                            'admin_list_messages'
+                            'admin_list_messages',
+                            'ticket_panels',
+                            'tickets'
                         ]
                         
                         # Проверяем наличие каждой таблицы
@@ -300,6 +302,8 @@ async def on_ready():
         await setup_admin(bot, db)
         await setup_privilege(bot, rcon_manager, db)
         await setup_warn(bot, db, rcon_manager)
+        if db:
+            await setup_tickets(bot, db)
         logger.info("✓ Команды загружены")
         
         # Синхронизация команд с Discord
