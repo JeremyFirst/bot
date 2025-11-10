@@ -297,24 +297,27 @@ class TicketManager:
 
         embed = discord.Embed(
             title=f"Тикет #{ticket_number:0{padding}d}",
-            description=reason_info.get("description", ""),
             color=discord.Color.dark_teal(),
             timestamp=datetime.now(timezone.utc)
         )
 
-        steam_value = form_data.get("steam_id") or "—"
+        raw_steam_value = form_data.get("steam_id") or "—"
+        if raw_steam_value.isdigit():
+            steam_value = f"[{raw_steam_value}](https://steamcommunity.com/profiles/{raw_steam_value})"
+        else:
+            steam_value = raw_steam_value
         violator_value = form_data.get("violator") or "—"
         evidence_value = form_data.get("evidence") or "—"
         date_value = form_data.get("date") or "—"
         reason_value = reason_info.get("label", reason_key)
         assignee_value = (
-            f"{assignee.mention}\nID: `{assignee.id}`" if assignee
+            f"{assignee.mention}" if assignee
             else "Будет назначен автоматически"
         )
 
         embed.add_field(
             name="Заявитель",
-            value=f"{interaction.user.mention}\nID: `{interaction.user.id}`\nSteamID: `{steam_value}`",
+            value=f"{interaction.user.mention}\nSteamID: {steam_value}",
             inline=True
         )
         embed.add_field(
@@ -357,11 +360,7 @@ class TicketManager:
 
         view = TicketView(self, ticket_id=ticket_id)
         await asyncio.sleep(0.5)
-        message = await channel.send(
-            content=f"{TICKET_PREFIX} Новый тикет создан.",
-            embed=embed,
-            view=view
-        )
+        message = await channel.send(embed=embed, view=view)
 
         await self.db.set_ticket_control_message(ticket_id, message.id)
         self.bot.add_view(view, message_id=message.id)
@@ -397,10 +396,10 @@ class TicketManager:
             timestamp=datetime.now(timezone.utc)
         )
         embed.add_field(name="Канал", value=channel.mention, inline=False)
-        embed.add_field(name="Заявитель", value=f"{opener.mention} (`{opener.id}`)", inline=True)
+        embed.add_field(name="Заявитель", value=f"{opener.mention}", inline=True)
         embed.add_field(
             name="Назначенный администратор",
-            value=f"{assignee.mention} (`{assignee.id}`)" if assignee else "Не назначен",
+            value=f"{assignee.mention}" if assignee else "Не назначен",
             inline=True
         )
         embed.add_field(name="Причина", value=reason_label, inline=False)
@@ -462,7 +461,7 @@ class TicketManager:
             timestamp=datetime.now(timezone.utc)
         )
         embed.add_field(name="Канал", value=f"<#{ticket['channel_id']}>", inline=False)
-        embed.add_field(name="Закрыл", value=f"{closer.mention} (`{closer.id}`)", inline=False)
+        embed.add_field(name="Закрыл", value=f"{closer.mention}", inline=False)
         if closing_comment:
             embed.add_field(name="Комментарий", value=closing_comment, inline=False)
         embed.add_field(name="Количество сообщений", value=str(message_count), inline=True)
@@ -509,7 +508,7 @@ class TicketManager:
                 timestamp=datetime.now(timezone.utc)
             )
             embed.add_field(name="Канал", value=f"<#{ticket['channel_id']}>", inline=False)
-            embed.add_field(name="Владелец", value=f"{closer.mention} (`{closer.id}`)", inline=False)
+            embed.add_field(name="Владелец", value=f"{closer.mention}", inline=False)
             await log_channel.send(embed=embed)
 
         if isinstance(channel, discord.TextChannel):

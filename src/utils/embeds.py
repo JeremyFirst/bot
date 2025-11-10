@@ -25,7 +25,7 @@ def create_privilege_added_embed(
     
     embed.add_field(
         name="Discord пользователь",
-        value=f"{discord_user.mention}\nID: `{discord_user.id}`",
+        value=f"{discord_user.mention}",
         inline=False
     )
     
@@ -95,7 +95,7 @@ def create_warning_embed(
     
     embed.add_field(
         name="Кому",
-        value=f"{warned_user.mention}\nID: `{warned_user.id}`",
+        value=f"{warned_user.mention}",
         inline=False
     )
     
@@ -147,7 +147,7 @@ def create_privilege_removed_embed(
     
     embed.add_field(
         name="Пользователь",
-        value=f"{discord_user.mention}\nID: `{discord_user.id}`",
+        value=f"{discord_user.mention}",
         inline=False
     )
     
