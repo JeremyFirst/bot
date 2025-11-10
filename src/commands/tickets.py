@@ -834,11 +834,10 @@ class TicketView(discord.ui.View):
             f"Текущий назначенный администратор: <@{current_assignee_id}>"
             if current_assignee_id else "Назначенного администратора нет."
         )
-        await send_ephemeral_with_delete(
-            interaction,
+        await interaction.followup.send(
             content=description,
             view=view,
-            delete_after=EPHEMERAL_DELETE_AFTER
+            ephemeral=True
         )
 
     @discord.ui.button(label="Закрыть тикет", style=discord.ButtonStyle.danger, custom_id="ticket_owner_close")
