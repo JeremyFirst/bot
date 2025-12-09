@@ -24,13 +24,15 @@ from config.config import (
     BOT_ACTIVITY_NAME,
     BOT_ACTIVITY_TYPE,
     CONSOLE_LOGS_ENABLED,
-    CONSOLE_LOGS_FILTERS
+    CONSOLE_LOGS_FILTERS,
+    ADMIN_LOG_API
 )
 from src.database.models import Database
 from src.rcon.rcon_manager import RCONManager
 from src.commands import setup_admin, setup_privilege, setup_warn, setup_tickets
 from src.tasks.scheduler import PrivilegeScheduler
 from src.utils.admin_list_manager import AdminListManager
+from src.api.log_receiver import LogReceiver
 
 # Настройка логирования
 log_file_path = LOG_FILE or 'logs/bot.log'
@@ -66,6 +68,7 @@ db: Optional[Database] = None
 rcon_manager: Optional[RCONManager] = None
 scheduler: Optional[PrivilegeScheduler] = None
 admin_list_manager: Optional[AdminListManager] = None
+log_receiver: Optional[LogReceiver] = None
 startup_message_sent = False  # Флаг для отслеживания отправки сообщения о запуске
 
 
@@ -328,6 +331,25 @@ async def on_ready():
             admin_list_manager = AdminListManager(bot, db)
             logger.info("✓ Менеджер состава администрации инициализирован")
         
+        # Инициализация HTTP API для приема логов от AdminLogCore
+        global log_receiver
+        if ADMIN_LOG_API.get('ENABLED', False):
+            try:
+                log_receiver = LogReceiver(
+                    bot=bot,
+                    auth_token=ADMIN_LOG_API.get('AUTH_TOKEN', 'SECRET_TOKEN'),
+                    log_channel_id=ADMIN_LOG_API.get('LOG_CHANNEL_ID', 0) or None
+                )
+                await log_receiver.start(
+                    host=ADMIN_LOG_API.get('HOST', '127.0.0.1'),
+                    port=ADMIN_LOG_API.get('PORT', 5000)
+                )
+                logger.info("✓ HTTP API для AdminLogCore запущен")
+            except Exception as e:
+                logger.error(f"Ошибка запуска HTTP API для AdminLogCore: {e}", exc_info=True)
+        else:
+            logger.info("HTTP API для AdminLogCore отключен (ADMIN_LOG_API.ENABLED = false)")
+        
         # Логирование в канал (если настроен) - только один раз
         if CHANNELS.get('ADMIN_LOGS') and not startup_message_sent:
             try:
@@ -410,9 +432,12 @@ async def on_command_error(ctx, error):
 
 async def cleanup():
     """Очистка ресурсов при завершении"""
-    global db, rcon_manager, scheduler
+    global db, rcon_manager, scheduler, log_receiver
     
     logger.info("Завершение работы бота...")
+    
+    if log_receiver:
+        await log_receiver.stop()
     
     if scheduler:
         await scheduler.stop()

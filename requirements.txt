@@ -13,5 +13,8 @@ aiomysql>=0.2.0,<0.3.0
 # YAML конфигурация
 PyYAML>=6.0,<7.0
 
+# HTTP сервер для приема логов от AdminLogCore
+aiohttp>=3.9.0,<4.0.0
+
 
 

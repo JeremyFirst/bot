@@ -181,9 +181,17 @@ BOT_ACTIVITY_TYPE = bot_activity_type_raw.lower() if isinstance(bot_activity_typ
 ephemeral_delete_after = get_config('EPHEMERAL_DELETE_AFTER', os.getenv('EPHEMERAL_DELETE_AFTER', '10'))
 EPHEMERAL_DELETE_AFTER = float(ephemeral_delete_after) if ephemeral_delete_after is not None else 10.0
 
-# Настройки тикет-системы
-ticket_system_yaml = CONFIG_DATA.get('TICKET_SYSTEM', {}) or {}
+# Настройки HTTP API для приема логов от AdminLogCore
+admin_log_api_yaml = CONFIG_DATA.get('ADMIN_LOG_API', {}) or {}
+ADMIN_LOG_API = {
+    'ENABLED': _parse_bool(admin_log_api_yaml.get('ENABLED', False)),
+    'HOST': admin_log_api_yaml.get('HOST', '127.0.0.1') or '127.0.0.1',
+    'PORT': _parse_int(admin_log_api_yaml.get('PORT', 5000), 5000),
+    'AUTH_TOKEN': admin_log_api_yaml.get('AUTH_TOKEN', 'SECRET_TOKEN') or 'SECRET_TOKEN',
+    'LOG_CHANNEL_ID': _parse_int(admin_log_api_yaml.get('LOG_CHANNEL_ID', 0), 0),
+}
 
+# Вспомогательные функции для парсинга
 def _parse_bool(value, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -198,6 +206,9 @@ def _parse_int(value, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+# Настройки тикет-системы
+ticket_system_yaml = CONFIG_DATA.get('TICKET_SYSTEM', {}) or {}
 
 admin_roles_yaml = ticket_system_yaml.get('ADMIN_ROLES', []) or []
 if isinstance(admin_roles_yaml, list):
