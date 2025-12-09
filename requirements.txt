@@ -10,6 +10,9 @@ websockets>=12.0,<13.0.0
 # MySQL/MariaDB асинхронный драйвер
 aiomysql>=0.2.0,<0.3.0
 
+# Криптография для аутентификации MySQL (caching_sha2_password)
+cryptography>=41.0.0,<42.0.0
+
 # YAML конфигурация
 PyYAML>=6.0,<7.0
 
