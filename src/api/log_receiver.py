@@ -147,8 +147,7 @@ class LogReceiver:
             embed = discord.Embed(
                 title=f"[{category}] {source}",
                 description=message,
-                color=color,
-                timestamp=datetime.utcnow()
+                color=color
             )
             
             # Добавление временной метки события (если есть)
